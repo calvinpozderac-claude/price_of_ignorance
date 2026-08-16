@@ -107,7 +107,7 @@ def backfire_survey():
 def traffic_maps():
     """Per-class flow fields on one network at pc, for the spatial figure."""
     _banner("Traffic maps")
-    L = 40
+    L = 30
     net = square_lattice(L, PC_SQUARE, rng=7)
     out = {
         "L": L,

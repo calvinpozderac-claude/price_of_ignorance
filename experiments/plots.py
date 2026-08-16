@@ -23,8 +23,8 @@ from poi.metrics import efficiency, saturation_alpha  # noqa: E402
 from poi.sweep import load  # noqa: E402
 from style import (  # noqa: E402
     AQUA, AXIS, BLUE, DIVERGING, GRID, INK, INK_2, MUTED, ORANGE, RED, SEQ_BLUE,
-    SEQ_ORANGE, SERIES, VIOLET, band, direct_label, mean_sem, ordinal, pc_line,
-    use_style,
+    SEQ_ORANGE, SERIES, SURFACE, VIOLET, band, direct_label, mean_sem, ordinal,
+    pc_line, use_style,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -135,7 +135,8 @@ def fig_paper_poa():
         ax.plot(p, m, color=c, label=f"L = {L}")
         band(ax, p, m - s, m + s, c)
         peaks.append(p[np.nanargmax(m)])
-        direct_label(ax, p[np.nanargmax(m)], np.nanmax(m), f"L={L}", c, dy=5)
+    # The four peaks nearly coincide, so direct labels would collide; the legend
+    # plus the ordered light-to-dark ramp (small to large L) carries identity.
     pc_line(ax, pc)
     ax.set_xlabel("fraction of congestible roads, $p$")
     ax.set_ylabel("price of anarchy, $P$")
@@ -150,7 +151,12 @@ def fig_paper_poa():
     ax.set_xlabel("system size, $L$")
     ax.set_ylabel("location of the POA peak")
     ax.set_title("(b)  The peak converges to $p_c$", loc="left")
-    ax.set_ylim(0.4, 0.8)
+    ax.set_ylim(0.54, 0.68)
+    ax.set_xticks(Ls)
+    ax.text(
+        Ls[0], 0.548, f"grid resolution {p[1] - p[0]:.3f}",
+        color=MUTED, fontsize=7.5, va="bottom",
+    )
 
     fig.suptitle(
         "Reproducing Skinner (2014) with the mixed-population solver at $\\alpha \\in \\{0, 1\\}$",
@@ -167,30 +173,43 @@ def fig_paper_scaling():
     L, ps, pc = d["L"], d["p"], float(d["pc"])
     m_pred = 1.097 / (1.733 + 1.097)
 
-    fig, ax = plt.subplots(figsize=(5.4, 4.2))
+    fig, ax = plt.subplots(figsize=(6.0, 4.4))
     labels = [r"$p = 0.30 < p_c$", r"$p = p_c$", r"$p = 0.80 > p_c$"]
     for i, (lab, c) in enumerate(zip(labels, SERIES)):
         ax.loglog(L, d["Ceq"][i], "o-", color=c, label=lab)
-        ax.loglog(L, d["Copt"][i], "o--", color=c, mfc=SEQ_BLUE(0.0), lw=1.2, ms=3.5)
-        direct_label(ax, L[-1], d["Ceq"][i][-1], lab, c)
+        ax.loglog(L, d["Copt"][i], "o--", color=c, mfc=SURFACE, lw=1.2, ms=3.5)
 
     ref = np.array([L[0], L[-1]], dtype=float)
-    for expo, y0, txt in [
-        (1.0, d["Ceq"][0][0], r"$C \propto L^{1}$"),
-        (m_pred, d["Ceq"][1][0], rf"$C \propto L^{{{m_pred:.3f}}}$"),
-        (0.0, d["Ceq"][2][0], r"$C \propto L^{0}$"),
+    for expo, y0, txt, va in [
+        (1.0, d["Ceq"][0][0], r"$C \propto L^{1}$", "bottom"),
+        (m_pred, d["Ceq"][1][0], rf"$C \propto L^{{{m_pred:.3f}}}$", "bottom"),
+        (0.0, d["Ceq"][2][0], r"$C \propto L^{0}$", "top"),
     ]:
         ax.loglog(ref, y0 * (ref / ref[0]) ** expo, color=MUTED, lw=0.9, ls=(0, (3, 3)), zorder=0)
-        ax.text(ref[-1] * 1.05, y0 * (ref[-1] / ref[0]) ** expo, txt, color=MUTED, fontsize=7.5)
+        ax.text(
+            ref[-1] * 1.06, y0 * (ref[-1] / ref[0]) ** expo, txt,
+            color=MUTED, fontsize=7.5, va=va,
+        )
 
     fits = [np.polyfit(np.log(L), np.log(d["Ceq"][i]), 1)[0] for i in range(3)]
+    handles = [plt.Line2D([], [], color=c, marker="o", ms=4) for c in SERIES]
+    handles += [
+        plt.Line2D([], [], color=INK_2, lw=1.6, label="_"),
+        plt.Line2D([], [], color=INK_2, lw=1.2, ls="--", mfc=SURFACE, label="_"),
+    ]
+    ax.legend(
+        handles,
+        labels + ["selfish equilibrium", "social optimum"],
+        loc="upper left", ncol=1,
+    )
     ax.set_xlabel("system size, $L$")
     ax.set_ylabel("average commute time, $C$")
     ax.set_title(
-        f"Commute time scaling (fitted $m$ at $p_c$: {fits[1]:.2f})", loc="left"
+        "Commute time scaling  "
+        + rf"(fitted slopes: {fits[0]:.2f}, {fits[1]:.2f}, {fits[2]:.2f})",
+        loc="left",
     )
-    ax.legend(loc="upper left")
-    ax.set_xlim(4, 130)
+    ax.set_xlim(4, 145)
     fig.tight_layout()
     _save(fig, "fig3_paper_scaling.png")
     return fits
@@ -445,15 +464,15 @@ def fig_traffic_maps():
         ("fA_0.5", "altruistic half  ($\\alpha=0.5$)", SEQ_ORANGE),
         ("x_1.0", "all altruistic  ($\\alpha=1$)", SEQ_BLUE),
     ]
-    fig, axes = plt.subplots(1, 4, figsize=(13.6, 3.6))
-    for ax, (key, title, cmap) in zip(axes, panels):
+    fig, axes = plt.subplots(2, 2, figsize=(11.4, 5.4))
+    for ax, (key, title, cmap) in zip(axes.ravel(), panels):
         f = d[key][:n]
         scale = f / max(np.nanmax(f), 1e-12)
         order = np.argsort(scale[keep])
         lc = LineCollection(
             segs[keep][order],
-            linewidths=0.25 + 2.6 * scale[keep][order],
-            colors=cmap(0.15 + 0.85 * scale[keep][order]),
+            linewidths=0.2 + 2.2 * scale[keep][order],
+            colors=cmap(0.12 + 0.88 * scale[keep][order]),
         )
         ax.add_collection(lc)
         ax.set_xlim(0, 2 * L)
@@ -467,7 +486,8 @@ def fig_traffic_maps():
             sp.set_color(GRID)
         ax.set_aspect("equal")
 
-    axes[0].set_ylabel("traffic flows left to right", color=INK_2)
+    for ax in axes[:, 0]:
+        ax.set_ylabel("flow: left to right", color=INK_2, fontsize=8)
     fig.suptitle(
         f"Where each class drives, at $p \\approx p_c$ ($L={L}$). "
         "Altruists spread onto the slow roads the selfish abandon.",
