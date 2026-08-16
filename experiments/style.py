@@ -10,6 +10,8 @@ the blue-red diverging pair with a neutral grey midpoint.
 
 from __future__ import annotations
 
+import warnings
+
 import matplotlib as mpl
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
@@ -119,9 +121,25 @@ def band(ax, x, lo, hi, color, alpha=0.16):
     ax.fill_between(x, lo, hi, color=color, alpha=alpha, lw=0, zorder=1)
 
 
+def nanmean(a, axis=None):
+    """``np.nanmean`` that returns NaN quietly for all-NaN slices.
+
+    The per-class costs are undefined at the endpoints (no altruists at
+    ``alpha = 0``, none selfish at ``alpha = 1``), so all-NaN slices are expected
+    rather than a symptom of failed solves.
+    """
+    a = np.asarray(a, dtype=float)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        return np.nanmean(a, axis=axis)
+
+
 def mean_sem(a, axis):
     """Disorder mean and standard error, ignoring any failed solves."""
-    m = np.nanmean(a, axis=axis)
+    a = np.asarray(a, dtype=float)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        m = np.nanmean(a, axis=axis)
+        sd = np.nanstd(a, axis=axis)
     n = np.sum(np.isfinite(a), axis=axis)
-    s = np.nanstd(a, axis=axis) / np.sqrt(np.maximum(n, 1))
-    return m, s
+    return m, sd / np.sqrt(np.maximum(n, 1))

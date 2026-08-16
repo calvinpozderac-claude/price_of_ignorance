@@ -23,8 +23,8 @@ from poi.metrics import efficiency, saturation_alpha  # noqa: E402
 from poi.sweep import load  # noqa: E402
 from style import (  # noqa: E402
     AQUA, AXIS, BLUE, DIVERGING, GRID, INK, INK_2, MUTED, ORANGE, RED, SEQ_BLUE,
-    SEQ_ORANGE, SERIES, SURFACE, VIOLET, band, direct_label, mean_sem, ordinal,
-    pc_line, use_style,
+    SEQ_ORANGE, SERIES, SURFACE, VIOLET, band, direct_label, mean_sem, nanmean,
+    ordinal, pc_line, use_style,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -231,7 +231,8 @@ def fig_altruism_curves():
         m, s = mean_sem(rel, axis=0)
         ax.plot(al, m, color=c, label=lab)
         band(ax, al, m - s, m + s, c)
-        direct_label(ax, 0.42, np.interp(0.42, al, m), lab.split("  ")[0], c, dy=6)
+        lx = [0.68, 0.68, 0.40][i]
+        direct_label(ax, lx, np.interp(lx, al, m), lab.split("  ")[0], c, dy=[8, -8, 8][i])
     ax.axhline(1.0, color=MUTED, lw=0.9, ls=(0, (4, 3)))
     ax.text(0.02, 1.0, "social optimum", color=INK_2, fontsize=8, va="bottom")
     ax.set_xlabel(r"altruistic fraction $\alpha$")
@@ -269,9 +270,10 @@ def fig_altruism_curves():
         m, s = mean_sem(eff, axis=0)
         ax.plot(al, m, color=c)
         band(ax, al, m - s, m + s, c)
-        direct_label(ax, 0.30, np.interp(0.30, al, m), lab.split("  ")[0], c, dy=7)
+        lx = [0.30, 0.44, 0.55][i]
+        direct_label(ax, lx, np.interp(lx, al, m), lab.split("  ")[0], c, dy=[-9, 9, 8][i])
     ax.plot(al, al, color=MUTED, lw=0.9, ls=(0, (3, 3)), zorder=0)
-    ax.text(0.62, 0.58, "proportional\nreturn", color=MUTED, fontsize=7.5, rotation=33)
+    ax.text(0.80, 0.63, "proportional\nreturn", color=MUTED, fontsize=7.5, rotation=30, ha="center")
     ax.set_xlabel(r"altruistic fraction $\alpha$")
     ax.set_ylabel(r"share of $C_{\rm eq}-C_{\rm opt}$ captured")
     ax.set_title("(c)  Early altruists do the heavy lifting", loc="left")
@@ -297,15 +299,15 @@ def fig_heatmaps():
         np.array([[efficiency(d["C"][i, j]) for j in range(d["C"].shape[1])] for i in range(p.size)]),
         axis=1,
     )
-    gap = np.nanmean(d["CA"] - d["CS"], axis=1)
-    regret = np.nanmean(d["CA"] - d["C"][:, :, [0]], axis=1)
+    gap = nanmean(d["CA"] - d["CS"], axis=1)
+    regret = nanmean(d["CA"] - d["C"][:, :, [0]], axis=1)
 
     fig, axes = plt.subplots(1, 3, figsize=(12.4, 3.9))
 
     ax = axes[0]
     im = ax.imshow(eff, origin="lower", aspect="auto", extent=ext, cmap=SEQ_BLUE, vmin=0, vmax=1)
-    cs = ax.contour(al, p, eff, levels=[0.5, 0.9, 0.99], colors="white", linewidths=0.9)
-    ax.clabel(cs, fmt={0.5: "50%", 0.9: "90%", 0.99: "99%"}, fontsize=7)
+    cs = ax.contour(al, p, eff, levels=[0.5, 0.9], colors="white", linewidths=1.0)
+    ax.clabel(cs, fmt={0.5: "50%", 0.9: "90%"}, fontsize=7, inline_spacing=2)
     fig.colorbar(im, ax=ax, label="share of achievable gain")
     ax.set_title("(a)  Gain captured", loc="left")
 
@@ -317,12 +319,20 @@ def fig_heatmaps():
     ax = axes[2]
     v = np.nanmax(np.abs(regret))
     im = ax.imshow(regret, origin="lower", aspect="auto", extent=ext, cmap=DIVERGING, vmin=-v, vmax=v)
-    ax.contour(al, p, regret, levels=[0.0], colors=[INK], linewidths=1.1)
+    ax.contour(al, p, regret, levels=[0.0], colors=[INK], linewidths=1.2)
     fig.colorbar(im, ax=ax, label=r"$C_A(\alpha) - C_{\rm eq}$")
     ax.set_title("(c)  Altruists vs. full anarchy", loc="left")
     ax.text(
-        0.52, 0.30, "above the black line altruists\nare worse off than if nobody\nhad cooperated at all",
-        transform=ax.transAxes, fontsize=7, color=INK, va="top",
+        0.24, 0.06, "worse off", transform=ax.transAxes, fontsize=8,
+        color="white", va="bottom", ha="center", fontweight="bold",
+    )
+    ax.text(
+        0.90, 0.06, "better off", transform=ax.transAxes, fontsize=8,
+        color="white", va="bottom", ha="center", fontweight="bold",
+    )
+    ax.text(
+        0.665, 0.955, "break-even", transform=ax.transAxes, fontsize=7.5,
+        color=INK, va="top", ha="right",
     )
 
     for ax in axes:
@@ -334,60 +344,97 @@ def fig_heatmaps():
 
     fig.suptitle(
         f"The $(p,\\alpha)$ plane, {int(d['n_seeds'])} disorder realisations per point, $L={int(d['L'])}$",
-        x=0.008, ha="left", fontsize=12, fontweight="bold", color=INK,
+        x=0.008, y=0.99, ha="left", fontsize=12, fontweight="bold", color=INK,
     )
-    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    fig.text(
+        0.008, 0.925,
+        "The gains arrive early and saturate (a), the altruists always pay for them (b), "
+        "and over most of the plane they pay more than full anarchy would have cost them (c).",
+        ha="left", fontsize=8.5, color=INK_2,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.90))
     _save(fig, "fig5_heatmaps.png")
 
 
 # ---------------------------------------------------------------- figure 6 --
 def fig_saturation():
-    """How the saturation point and the exploitation peak track the threshold."""
+    """What the percolation threshold does to the *distributional* quantities.
+
+    The price of anarchy peaks at ``pc`` (the paper's result).  The altruists'
+    penalty does not: measured in absolute time it peaks far *below* ``pc``,
+    simply because commutes are far longer there.  Normalised by the cost scale
+    it instead plateaus and then collapses just above ``pc`` -- so the threshold
+    marks the *edge* of the regime where altruism matters at all, not a peak.
+    """
     d = load(os.path.join(RESULTS, "altruism_grid.npz"))
     p, al, pc = d["p"], d["alpha"], float(d["pc"])
 
     astar = np.array(
         [[saturation_alpha(al, d["C"][i, j]) for j in range(d["C"].shape[1])] for i in range(p.size)]
     )
-    gap = d["CA"] - d["CS"]
-    maxgap = np.nanmax(gap, axis=2)
+    maxgap = np.nanmax(d["CA"] - d["CS"], axis=2)
+    rel_gap = maxgap / d["C"][:, :, -1]
     poa = d["summary_poa"]
 
-    fig, axes = plt.subplots(1, 3, figsize=(12.0, 3.7))
+    fig, axes = plt.subplots(1, 4, figsize=(14.2, 3.6))
 
     ax = axes[0]
     m, s = mean_sem(poa, axis=1)
     ax.plot(p, m, color=BLUE)
     band(ax, p, m - s, m + s, BLUE)
     pc_line(ax, pc)
-    ax.set_xlabel("fraction of congestible roads, $p$")
+    ax.plot([p[np.nanargmax(m)]], [np.nanmax(m)], "o", color=BLUE, ms=5, zorder=4)
     ax.set_ylabel(r"price of anarchy $C_{\rm eq}/C_{\rm opt}$")
-    ax.set_title("(a)  Inefficiency peaks at $p_c$", loc="left")
+    ax.set_title("(a)  Inefficiency peaks near $p_c$", loc="left")
 
     ax = axes[1]
-    m, s = mean_sem(astar, axis=1)
+    m, s = mean_sem(maxgap, axis=1)
     ax.plot(p, m, color=ORANGE)
     band(ax, p, m - s, m + s, ORANGE)
     pc_line(ax, pc)
-    ax.set_xlabel("fraction of congestible roads, $p$")
-    ax.set_ylabel(r"saturating fraction $\alpha^*$")
-    ax.set_title(r"(b)  Altruists needed to capture the gain", loc="left")
-    ax.set_ylim(0, 1)
+    ax.plot([p[np.nanargmax(m)]], [np.nanmax(m)], "o", color=ORANGE, ms=5, zorder=4)
+    ax.annotate(
+        "peaks well below $p_c$ —\ncommutes are simply\nlonger down here",
+        xy=(p[np.nanargmax(m)], np.nanmax(m)), xytext=(0.44, 0.70),
+        textcoords="axes fraction", color=INK_2, fontsize=7.5,
+        arrowprops=dict(arrowstyle="->", color=MUTED, lw=0.9, shrinkA=2, shrinkB=4),
+    )
+    ax.set_ylabel(r"peak gap $C_A - C_S$  (absolute)")
+    ax.set_title("(b)  Absolute penalty is misleading", loc="left")
 
     ax = axes[2]
-    m, s = mean_sem(maxgap, axis=1)
+    m, s = mean_sem(rel_gap, axis=1)
     ax.plot(p, m, color=AQUA)
     band(ax, p, m - s, m + s, AQUA)
     pc_line(ax, pc)
-    ax.set_xlabel("fraction of congestible roads, $p$")
-    ax.set_ylabel(r"peak $C_A - C_S$")
-    ax.set_title("(c)  Exploitation is worst at $p_c$ too", loc="left")
+    ax.set_ylabel(r"peak $(C_A - C_S)\,/\,C_{\rm opt}$")
+    ax.set_title("(c)  Relative penalty dies just above $p_c$", loc="left")
+    ax.set_ylim(0, None)
+
+    ax = axes[3]
+    m, s = mean_sem(astar, axis=1)
+    ax.plot(p, m, color=VIOLET)
+    band(ax, p, m - s, m + s, VIOLET)
+    pc_line(ax, pc)
+    ax.set_ylabel(r"saturating fraction $\alpha^*$")
+    ax.set_title(r"(d)  ...and so does the need for altruists", loc="left")
+    ax.set_ylim(0, 1)
+
+    for ax in axes:
+        ax.set_xlabel("fraction of congestible roads, $p$")
+        ax.axvspan(pc, 1.0, color=GRID, alpha=0.5, lw=0, zorder=0)
 
     fig.suptitle(
-        "Everything peaks at the percolation threshold — including the cost of being nice",
-        x=0.008, ha="left", fontsize=12, fontweight="bold", color=INK,
+        "The percolation threshold bounds the regime where altruism matters at all",
+        x=0.008, y=0.99, ha="left", fontsize=12, fontweight="bold", color=INK,
     )
-    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    fig.text(
+        0.008, 0.935,
+        "Above $p_c$ (shaded) there are many parallel congestible routes, the selfish equilibrium is already "
+        "optimal, and altruism is neither useful nor costly.",
+        ha="left", fontsize=8.5, color=INK_2,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.87))
     _save(fig, "fig6_saturation.png")
 
 
@@ -437,9 +484,17 @@ def fig_backfire():
 
     fig.suptitle(
         "Adding altruists is not always an improvement",
-        x=0.008, ha="left", fontsize=12, fontweight="bold", color=INK,
+        x=0.008, y=0.99, ha="left", fontsize=12, fontweight="bold", color=INK,
     )
-    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    fig.text(
+        0.008, 0.925,
+        f"Real but small: {100 * np.mean(d['summary_max_backfire'] > 1e-7):.0f}% of networks show some "
+        f"range of $\\alpha$ over which the average commute rises, by at most "
+        f"{100 * np.nanmax(d['summary_max_backfire'] / d['C'][:, :, -1]):.2f}% of $C_{{\\rm opt}}$ on any single "
+        f"network. Like everything else, it vanishes above $p_c$.",
+        ha="left", fontsize=8.5, color=INK_2,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.90))
     _save(fig, "fig7_backfire.png")
 
 
@@ -459,41 +514,63 @@ def fig_traffic_maps():
     cong = d["congestible"][:n]
 
     panels = [
-        ("x_0.0", "all selfish  ($\\alpha=0$)", SEQ_BLUE),
-        ("fS_0.5", "selfish half  ($\\alpha=0.5$)", SEQ_BLUE),
-        ("fA_0.5", "altruistic half  ($\\alpha=0.5$)", SEQ_ORANGE),
-        ("x_1.0", "all altruistic  ($\\alpha=1$)", SEQ_BLUE),
+        ("x_0.0", r"all selfish  ($\alpha=0$)", SEQ_BLUE, "solo"),
+        ("x_1.0", r"all altruistic  ($\alpha=1$)", SEQ_BLUE, "solo"),
+        ("fS_0.5", r"the selfish half  ($\alpha=0.5$)", SEQ_BLUE, "pair"),
+        ("fA_0.5", r"the altruistic half  ($\alpha=0.5$)", SEQ_ORANGE, "pair"),
     ]
-    fig, axes = plt.subplots(2, 2, figsize=(11.4, 5.4))
-    for ax, (key, title, cmap) in zip(axes.ravel(), panels):
+    # The two alpha = 0.5 panels share a normalisation so the classes can be
+    # compared directly; the two single-class panels use their own maxima.
+    pair_max = max(np.nanmax(d["fS_0.5"][:n]), np.nanmax(d["fA_0.5"][:n]))
+
+    def concentration(f):
+        """Roads carrying any traffic, and the share borne by the busiest tenth."""
+        f = np.asarray(f, dtype=float)
+        used = int((f > 1e-9).sum())
+        top = np.sort(f)[::-1][: max(1, int(0.1 * f.size))].sum() / max(f.sum(), 1e-12)
+        return used, top
+
+    uS, tS = concentration(d["fS_0.5"][:n])
+    uA, tA = concentration(d["fA_0.5"][:n])
+
+    fig, axes = plt.subplots(2, 2, figsize=(9.8, 5.4))
+    for ax, (key, title, cmap, norm) in zip(axes.ravel(), panels):
         f = d[key][:n]
-        scale = f / max(np.nanmax(f), 1e-12)
+        ref = pair_max if norm == "pair" else np.nanmax(f)
+        scale = np.clip(f / max(ref, 1e-12), 0, 1)
         order = np.argsort(scale[keep])
         lc = LineCollection(
             segs[keep][order],
-            linewidths=0.2 + 2.2 * scale[keep][order],
-            colors=cmap(0.12 + 0.88 * scale[keep][order]),
+            linewidths=0.15 + 2.4 * scale[keep][order],
+            colors=cmap(0.10 + 0.90 * scale[keep][order]),
         )
         ax.add_collection(lc)
         ax.set_xlim(0, 2 * L)
         ax.set_ylim(0, L)
-        ax.set_title(title, loc="left")
+        ax.set_box_aspect(0.5)
+        ax.set_title(title, loc="left", fontsize=9.5)
         ax.set_xticks([])
         ax.set_yticks([])
         ax.grid(False)
         for sp in ax.spines.values():
             sp.set_visible(True)
-            sp.set_color(GRID)
-        ax.set_aspect("equal")
+            sp.set_color(AXIS)
 
     for ax in axes[:, 0]:
         ax.set_ylabel("flow: left to right", color=INK_2, fontsize=8)
     fig.suptitle(
-        f"Where each class drives, at $p \\approx p_c$ ($L={L}$). "
-        "Altruists spread onto the slow roads the selfish abandon.",
-        x=0.008, ha="left", fontsize=12, fontweight="bold", color=INK,
+        f"Where each class actually drives, at $p \\approx p_c$  ($L={L}$)",
+        x=0.008, y=0.99, ha="left", fontsize=12, fontweight="bold", color=INK,
     )
-    fig.tight_layout(rect=(0, 0, 1, 0.90))
+    fig.text(
+        0.008, 0.935,
+        "Line width and colour show road usage. Both classes travel almost entirely on congestible roads; what "
+        "differs is how they spread out.\n"
+        f"At $\\alpha=0.5$ the selfish squeeze onto {uS} roads with their busiest tenth carrying {100*tS:.0f}% of "
+        f"their travel; the altruists use {uA} roads and only {100*tA:.0f}%.",
+        ha="left", fontsize=8.5, color=INK_2, va="top",
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.88), h_pad=2.2)
     _save(fig, "fig8_traffic_maps.png")
 
 

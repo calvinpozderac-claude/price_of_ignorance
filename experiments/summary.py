@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import sys
 
+import warnings
+
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -97,8 +99,20 @@ def backfire():
     print(f"  largest mean rise at p = {p[j]:.3f}: {100*rel[j]:.2f}% of C_opt")
     print(f"  max single-network rise: {100*np.nanmax(mb/Copt):.2f}% of C_opt")
 
+    # The stronger claim: a mixed population that is worse than pure anarchy.
+    C = d["C"]
+    worse = C > C[:, :, [0]] + 1e-7
+    print(
+        f"  cases where a mixed population is worse than FULL ANARCHY: "
+        f"{100*worse.mean():.2f}% of all (network, alpha) pairs"
+    )
+    if worse.any():
+        ip = np.argmax(worse.reshape(worse.shape[0], -1).mean(axis=1))
+        print(f"    concentrated near p = {p[ip]:.3f}")
+
 
 if __name__ == "__main__":
+    warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN slices at alpha 0 and 1
     pigou()
     if os.path.exists(os.path.join(RESULTS, "paper_poa.npz")):
         paper()

@@ -20,10 +20,13 @@ phenomenon**:
 * Every unit of that gain is collected by the selfish drivers. Altruists always
   experience a *longer* commute than selfish drivers, and on the lattice they end
   up worse off than **everybody** was under pure anarchy.
-* Both effects are largest at the percolation threshold `p_c ≈ 0.6447` — the same
-  point where Skinner's price of anarchy peaks.
-* Adding altruists is not even monotonically helpful: on a minority of networks,
-  converting selfish drivers into altruists makes the average commute *worse*.
+* The percolation threshold `p_c ≈ 0.6447` bounds the whole phenomenon. Below it
+  altruism is both valuable and personally expensive; just above it the selfish
+  equilibrium is already optimal, and altruism becomes simultaneously useless and
+  free.
+* Adding altruists is not even monotonically helpful: on ~9% of networks there is
+  a range of `α` over which converting selfish drivers into altruists makes the
+  average commute *worse*. The effect is real but small (≤0.4% of `C_opt`).
 
 ## Contents
 
@@ -142,22 +145,50 @@ peak location converges to `p_c`. The commute time scales as `C ∝ L¹` below
 
 Yes — and the Pigou structure survives the disorder. Total commute time falls
 with `α`, but the curve is strongly concave: the first altruists do most of the
-work and the gain saturates well before `α = 1`. Meanwhile the altruists'
-own experienced commute sits *above* the pure-anarchy cost over a wide range of
-`α` — on the lattice they are strictly worse off than anyone was before altruism
-was introduced, not merely no better off as in Pigou.
+work. At `p_c`, a quarter of the population being altruistic already captures
+**53%** of the achievable gain and half captures **86%**.
 
-### 4. Everything peaks at the percolation threshold
+The distributional picture is worse than Pigou's, though. At `p_c` the altruists'
+own commute *starts above* the pure-anarchy cost and stays there across **69%**
+of the `α` range — peaking at 9.2% worse than `C_eq`. On the lattice altruists
+are strictly worse off than *anyone* was before altruism was introduced, not
+merely no better off as in Pigou. Meanwhile the selfish drivers end up **14%
+faster than the social optimum's average** — they are not just free-riding on the
+gain, they are consuming more than all of it.
+
+| at `p = p_c`, `L = 20` | value |
+|---|---|
+| price of anarchy `C(0)/C(1)` | 1.051 |
+| gain captured at `α = 0.25` | 53% |
+| gain captured at `α = 0.50` | 86% |
+| mean saturating fraction `α*` | 0.64 |
+| peak `C_A - C_S` | 0.66 (17% of `C_opt`) |
+| altruists worse off than full anarchy | over 69% of the `α` range |
+| best selfish commute vs `C_opt` | 14% faster |
+
+### 4. What the percolation threshold actually controls
 
 ![Heatmaps](figures/fig5_heatmaps.png)
 ![Saturation](figures/fig6_saturation.png)
 
-Skinner's result is that inefficiency is maximal at `p_c`. The mixed population
-shows the same threshold governs the *distributional* question: the altruist /
-selfish commute gap, and the fraction of altruists needed before the gains
-saturate, both peak at `p_c`. At threshold, a single macroscopic percolating
-path of fast roads is the thing being fought over — it is simultaneously what
-makes anarchy costly and what makes cooperating expensive for the cooperator.
+Skinner's result is that *inefficiency* is maximal at `p_c`, and that reproduces.
+The distributional quantities behave differently, and it is worth being precise
+about how — the naive guess that they also peak at `p_c` is wrong:
+
+* The **absolute** altruist penalty `C_A - C_S` peaks near `p ≈ 0.23`, far below
+  `p_c`. That is not a real effect: below `p_c` traffic must cross many constant
+  roads, so `C ∝ L` and *every* time difference is larger down there.
+* Normalised by the cost scale, `(C_A - C_S)/C_opt` instead rises to a **plateau
+  of ≈ 22%** spanning roughly `0.55 < p < 0.78` — straddling `p_c` — and then
+  collapses to zero within a few percent of `p_c`.
+* The saturating fraction `α*` behaves the same way: ≈ 0.85 below `p_c`,
+  falling through zero just above it.
+
+So `p_c` is the **upper edge** of the regime in which altruism means anything,
+not a peak in it. Above `p_c` there are many parallel all-congestible routes, the
+selfish equilibrium is already optimal (`POA → 1`), and altruism is at once
+worthless and costless. Below `p_c` there are gains to be had, and someone has to
+pay for them.
 
 ### 5. Altruism can backfire
 
@@ -168,15 +199,26 @@ Because the mixed equilibrium minimises a potential rather than the total cost,
 drivers into altruists makes the *average* commute worse over a range of `α`.
 This is a genuine effect, not solver noise: a certified example at `p = 0.4`,
 `L = 10` dips to `C = 6.9965` at `α = 0.20` and then climbs to `C = 7.0286` at
-`α = 0.28`, with all costs certified unique to 7 digits.
+`α = 0.28`, with all costs certified unique to 7 digits by `cost_range`.
+
+It is also small, and worth not overselling: across 2976 random networks, 8.8%
+show some backfiring range, the largest rise on any single network is 0.38% of
+`C_opt`, and only 0.16% of all `(network, α)` pairs are actually worse than full
+anarchy. Like everything else here, it vanishes above `p_c`.
 
 ### 6. Where each class drives
 
 ![Traffic](figures/fig8_traffic_maps.png)
 
-At `p ≈ p_c` the selfish concentrate onto the percolating backbone of congestible
-roads; altruists spread onto the slower constant roads the selfish have
-abandoned. The altruists are, quite literally, getting out of the way.
+The intuitive story — "altruists take the slow roads" — turns out to be wrong,
+and the data says so: at `p ≈ p_c` **both** classes do ~98% of their travel on
+congestible roads. What actually differs is *concentration*. At `α = 0.5` the
+selfish squeeze onto 1241 roads with their busiest tenth carrying 62% of their
+travel; the altruists spread the same amount of traffic over 1552 roads, with
+only 47% on their busiest tenth. Altruists do not avoid the fast roads — they
+decline to pile onto the *same* fast roads, which is what leaves those roads
+clear for the selfish. This matches the paper's own Fig. 10, where the optimum
+has a visibly more even flow distribution than the equilibrium.
 
 ## Caveats
 
