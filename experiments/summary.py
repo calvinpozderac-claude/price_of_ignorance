@@ -111,12 +111,114 @@ def backfire():
         print(f"    concentrated near p = {p[ip]:.3f}")
 
 
+
+
+# ==================== user-ignorance extension (arXiv:2503.09684) ==========
+OMEGA_STAR = 2.0 / 3.0
+
+
+def gamma_star(w):
+    return (2 - 3 * np.asarray(w, float)) / (2 - np.asarray(w, float))
+
+
+def ignorance():
+    head("Ignorance paper reproduced (omega = ignorance, their alpha)")
+    d = load(os.path.join(RESULTS, "ignorance_surface.npz"))
+    p, w = d["p"], d["omega"]
+    C = d["C"][:, :, :, 0]
+    PI = np.nanmean(C / C[:, [0], :], axis=2)
+    below = w <= OMEGA_STAR + 1e-9
+    print(f"  max PI over all p, for omega <= 2/3 : {PI[:, below].max():.4f}  (paper: <= 1)")
+    i, j = np.unravel_index(np.argmin(PI), PI.shape)
+    print(f"  minimum PI = {PI.min():.4f} at p = {p[i]:.3f}, omega = {w[j]:.3f}")
+    print(f"    (paper: min ~0.95 near p_c = {float(d['pc'])}, omega ~ 2/3)")
+    jj = int(np.argmin(abs(w - OMEGA_STAR)))
+    print(f"  at omega = 2/3 exactly: max PI = {PI[:, jj].max():.4f}, min = {PI[:, jj].min():.4f}")
+    # limit of useful ignorance
+    star = []
+    for i in range(p.size):
+        over = np.flatnonzero(PI[i] > 1 + 1e-4)
+        star.append(w[over[0]] if over.size else 1.0)
+    star = np.array(star)
+    lo = p < float(d["pc"])
+    print(f"  limit of useful ignorance omega*: {star[lo].mean():.3f} below p_c (paper quotes ~6/7 = {6/7:.3f})")
+
+
+def joint():
+    head("Altruism crossed with ignorance")
+    d = load(os.path.join(RESULTS, "joint_surface.npz"))
+    p, w, al = d["p"], d["omega"], d["alpha"]
+    C = np.nanmean(d["C"], axis=2)
+    for i, pp in enumerate(p):
+        rel = C[i] / C[i].min()
+        j, k = np.unravel_index(np.argmin(C[i]), C[i].shape)
+        print(f"\n  p = {pp:.4f}   (L = {int(d['L'])}, {int(d['n_seeds'])} realisations)")
+        print(f"    cheapest overall at omega = {w[j]:.2f}, alpha = {al[k]:.2f}  -> C = {C[i].min():.4f}")
+        print(f"    all-selfish, no ignorance   C = {C[i][0, 0]:.4f}  (+{100*(C[i][0,0]/C[i].min()-1):.2f}%)")
+        print(f"    all-altruistic, no ignorance C = {C[i][0, -1]:.4f}  (+{100*(C[i][0,-1]/C[i].min()-1):.2f}%)")
+        jj = int(np.argmin(abs(w - OMEGA_STAR)))
+        print(f"    ignorant selfish (w=2/3, a=0) C = {C[i][jj, 0]:.4f}  (+{100*(C[i][jj,0]/C[i].min()-1):.2f}%)")
+        print(f"    BOTH  (w=2/3, a=1)            C = {C[i][jj, -1]:.4f}  (+{100*(C[i][jj,-1]/C[i].min()-1):.2f}%)")
+        print(f"      -> adding altruists at w=2/3 changes C by {100*(C[i][jj,-1]/C[i][jj,0]-1):+.2f}%")
+        # where does the sign flip?
+        delta = C[i][:, -1] - C[i][:, 0]
+        flip = np.flatnonzero(delta > 0)
+        if flip.size:
+            print(f"    altruism starts hurting at omega ~ {w[flip[0]]:.2f}")
+
+
+def sign_boundary():
+    head("Where does altruism flip from helping to hurting?")
+    d = load(os.path.join(RESULTS, "sign_boundary.npz"))
+    p, w = d["p"], d["omega"]
+    C = np.nanmean(d["C"], axis=2)
+    delta = C[:, :, -1] - C[:, :, 0]
+    print("    p      omega_c (alpha=1 vs 0)")
+    wc = []
+    for i in range(p.size):
+        f = np.flatnonzero(delta[i] > 0)
+        v = w[f[0]] if f.size else np.nan
+        wc.append(v)
+        if i % 3 == 0:
+            print(f"   {p[i]:.3f}    {v:.3f}")
+    wc = np.array(wc, float)
+    print(f"\n  mean omega_c over all p = {np.nanmean(wc):.3f}   (2/3 = {OMEGA_STAR:.3f})")
+    print(f"  spread: {np.nanmin(wc):.3f} to {np.nanmax(wc):.3f}")
+    frac = np.mean(delta > 0)
+    print(f"  fraction of the (p, omega) grid where altruism makes traffic worse: {100*frac:.0f}%")
+
+
+def substitution():
+    head("The altruism-ignorance substitution curve")
+    d = load(os.path.join(RESULTS, "substitution.npz"))
+    p, w, g, C = d["p"], d["omega"], d["gamma"], d["C"]
+    print("  predicted gamma* = (2-3w)/(2-w);  measured = argmin_gamma C")
+    print("   omega   predicted " + "".join(f"  p={v:.2f}" for v in p))
+    errs = []
+    for j, ww in enumerate(w):
+        if j % 3:
+            continue
+        meas = [g[np.argmin(C[i, j])] for i in range(p.size)]
+        errs += [abs(m - gamma_star(ww)) for m in meas]
+        print(f"   {ww:.3f}   {gamma_star(ww):+.3f}   " + "".join(f" {m:+.3f}" for m in meas))
+    allm = np.array([[g[np.argmin(C[i, j])] for i in range(p.size)] for j in range(w.size)])
+    err = np.abs(allm - gamma_star(w)[:, None])
+    print(f"\n  max |measured - predicted| = {err.max():.3f}  (gamma grid step {g[1]-g[0]:.3f})")
+    print(f"  mean |error|               = {err.mean():.4f}")
+    print(f"  gamma* < 0 (spite needed) once omega > 2/3: {gamma_star(0.8):+.3f} at omega=0.8")
+
+
 if __name__ == "__main__":
     warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN slices at alpha 0 and 1
-    pigou()
-    if os.path.exists(os.path.join(RESULTS, "paper_poa.npz")):
-        paper()
-    if os.path.exists(os.path.join(RESULTS, "altruism_fine.npz")):
-        altruism()
-    if os.path.exists(os.path.join(RESULTS, "backfire.npz")):
-        backfire()
+    for name, fn in [
+        (None, pigou),
+        ("paper_poa", paper),
+        ("altruism_fine", altruism),
+        ("backfire", backfire),
+        ("ignorance_surface", ignorance),
+        ("joint_surface", joint),
+        ("sign_boundary", sign_boundary),
+        ("substitution", substitution),
+    ]:
+        if name is None or os.path.exists(os.path.join(RESULTS, name + ".npz")):
+            fn()

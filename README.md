@@ -28,22 +28,46 @@ phenomenon**:
   a range of `α` over which converting selfish drivers into altruists makes the
   average commute *worse*. The effect is real but small (≤0.4% of `C_opt`).
 
+And once drivers are also **ignorant** about which roads are fast
+([arXiv:2503.09684](https://arxiv.org/abs/2503.09684)), that last effect stops
+being small and takes over:
+
+* Ignorance corrects the same error altruism corrects, so the two are
+  **substitutes, not complements**. Either one alone can reach the social
+  optimum; using both overshoots it.
+* Past a critical ignorance level, **recruiting altruists actively slows traffic
+  down** — by 5% at `p_c`, and by 20% at heavy ignorance. This holds over 57% of
+  the `(p, ω)` plane.
+* There is a closed-form trade-off: a uniform population reaches the optimum at
+  altruism level `γ* = (2 − 3ω)/(2 − ω)`. It gives `γ* = 1` with perfect
+  knowledge, hits **exactly zero at `ω = 2/3`** — rederiving the ignorance
+  paper's threshold from the altruism side — and goes *negative* beyond it,
+  where the corrective role would have to be played by spite.
+
 ## Contents
 
 ```
-poi/lattice.py   the paper's directed lattice, plus Pigou and a 3D BCC variant
-poi/qp.py        the mixed-equilibrium convex QP (Clarabel) + a degeneracy certificate
-poi/pigou.py     exact closed-form solution of the two-road case
-poi/metrics.py   efficiency, saturation, exploitation gap, backfire
-poi/sweep.py     parallel disorder-averaged sweeps
-experiments/     compute.py builds results/*.npz; plots.py renders figures/*.png
-tests/           222 tests: paper sanity checks, closed form vs solver, equilibrium conditions
+poi/lattice.py    the papers' directed lattice, plus Pigou and a 3D BCC variant
+poi/qp.py         the mixed-equilibrium convex QP (Clarabel) + a degeneracy certificate
+poi/ignorance.py  perceived-cost mixing, and the ignorance/altruism composition
+poi/pigou.py      exact closed-form two-road solution, with and without ignorance
+poi/metrics.py    efficiency, saturation, exploitation gap, backfire
+poi/sweep.py      parallel disorder-averaged sweeps over (p, omega, alpha)
+experiments/      compute.py builds results/*.npz; plots.py renders figures/*.png
+                  summary.py prints every headline number
+tests/            319 tests: both papers' sanity checks, closed forms vs solver,
+                  equilibrium conditions, and the analytic substitution law
 ```
+
+**Notation.** The two source papers both use `α`. Here `α` is always the
+*altruistic fraction* (from arXiv:1404.2935's successor question) and `ω` is the
+*ignorance level* (arXiv:2503.09684's `α`).
 
 ```bash
 pip install -r requirements.txt
 python -m pytest tests/ -q          # ~5 s
-python experiments/compute.py       # ~40 min on 4 cores
+python experiments/compute.py       # ~2 h on 4 cores
+python experiments/summary.py       # every number quoted below
 python experiments/plots.py
 ```
 
@@ -220,6 +244,139 @@ decline to pile onto the *same* fast roads, which is what leaves those roads
 clear for the selfish. This matches the paper's own Fig. 10, where the optimum
 has a visibly more even flow distribution than the equilibrium.
 
+## Part II: what if drivers don't know which roads are fast?
+
+The companion paper, *[The benefit of ignorance for traffic through a random
+congestible network](https://arxiv.org/abs/2503.09684)* (Saray, Pozderac,
+Josephson & Skinner), asks a different question of the same lattice: what if
+drivers cannot reliably tell a fast road from a slow one? Each driver plans
+against a **perceived** cost that blends the road's true cost function with the
+other type's. With `u = ω/2`:
+
+```
+slow road (true c = 1):  c^p(x) = (1 − u) + u·x
+fast road (true c = x):  c^p(x) = u + (1 − u)·x
+```
+
+`ω = 0` is perfect knowledge; `ω = 1` makes every road look identical. Their
+striking result is that ignorance *helps*: it stops selfish drivers piling onto
+the fast roads, and for any `ω ≤ 2/3` the price of ignorance `P_I = C(ω)/C(0)`
+is below 1 at every `p`.
+
+### 6. The ignorance paper, reproduced
+
+![Ignorance](figures/fig9_ignorance_surface.png)
+
+The two models compose with **no new solver**. Perceived costs stay affine, and
+the mixed-equilibrium QP already accepts arbitrary affine coefficients — so
+ignorance is just a transformation of `(a_e, b_e)`. Behaviour follows perceived
+costs; outcomes are scored with true ones.
+
+| check | paper | here |
+|---|---|---|
+| Pigou currents | `(ω/2, 1 − ω/2)` | exact |
+| Pigou price of ignorance | `1 − (ω/2)(1 − ω/2)` | exact |
+| `ω = 1` flow | uniform, `C = p + 2L(1−p)` | exact to 1e-15 |
+| `P_I ≤ 1` for all `p` when `ω ≤ 2/3` | yes | max `P_I` = 1.0000 |
+| minimum `P_I` | ≈ 0.95 near `p_c`, `ω ≈ 2/3` | 0.951 at `p = 0.65`, `ω = 0.68` |
+| limit of useful ignorance below `p_c` | ≈ 6/7 = 0.857 | 0.840 |
+| their Eq. 12 identity `F_{2/3} = C/3 + (1/6)Σ_slow x² + const` | — | holds to 1e-16 |
+
+### 7. An ignorant altruist aims at the wrong target
+
+This is the modelling choice that makes the two effects interact rather than
+simply add. An altruist minimises the total commute time *as she believes it to
+be*, so she responds to the **perceived** marginal social cost `a^p + 2b^p x`.
+When `ω > 0` that is not the true marginal cost, so she misaims.
+
+In Pigou this does not bite — the closed form extends cleanly, and it turns out
+the minimiser of the perceived total cost coincides with the true optimum
+`x₂ = 1/2` for *every* `ω`. So in the two-road network ignorance never corrupts
+an altruist's aim, and altruism never hurts. What it does instead is become
+**redundant**: for `α < ω/2` the altruists change nothing at all, and at `ω = 1`
+the network is already optimal for every `α`.
+
+On the lattice the coincidence fails, and the interaction is real.
+
+### 8. Adding altruists can slow traffic down
+
+![Joint surface](figures/fig10_joint_surface.png)
+![Reversal](figures/fig11_altruism_reversal.png)
+
+At `p_c` (`L = 20`, 32 realisations), four corners of the `(ω, α)` plane:
+
+| population | `C` | vs best |
+|---|---|---|
+| selfish, informed (`ω=0, α=0`) | 4.056 | +5.20% |
+| **altruistic, informed** (`ω=0, α=1`) | **3.855** | — |
+| **selfish, ignorant** (`ω=2/3, α=0`) | **3.857** | +0.06% |
+| altruistic *and* ignorant (`ω=2/3, α=1`) | 4.051 | +5.08% |
+
+Two completely different populations — everyone altruistic and well-informed, or
+everyone selfish and ignorant — land within 0.06% of the same optimum. Combining
+both corrections is almost exactly as bad as applying neither.
+
+So the answer to the original guess is **yes, and more strongly than expected**.
+Going from `α = 0` to `α = 1` at `ω = 2/3` *raises* the commute time by 5.0% at
+`p_c`, 3.8% at `p = 0.45` and 0.4% at `p = 0.85`. Across the whole `(p, ω)`
+grid, altruism is harmful over **57%** of it.
+
+### 9. The trade-off has a closed form
+
+![Substitution](figures/fig12_substitution.png)
+
+For a *uniform* population at altruism level `γ` (everyone responds to
+`c + γ·x·c'`), the perceived objective can be rescaled — using the fact that
+every path crosses exactly `2L` roads, so a constant per-road offset is free —
+into
+
+```
+Σ_slow [ K·x + (u/(1−u))·x²/2 ]  +  Σ_fast x²/2 ,    K = (1−2u)/((1+γ)(1−u))
+```
+
+The true optimum is `K = 1/2`, giving
+
+```
+γ*(ω) = (2 − 3ω)/(2 − ω)
+```
+
+Three limits check out, and the third is the punchline:
+
+* `γ*(0) = 1` — with perfect knowledge you need full marginal-cost routing.
+* `γ*(2/3) = 0` — at the ignorance paper's threshold you need **no altruism at
+  all**. Their `2/3` falls out of the altruism algebra, independently.
+* `γ*(ω) < 0` for `ω > 2/3` — beyond that, the corrective role would have to be
+  played by **spite**.
+
+Measured against a brute-force scan over `γ` at four `p` values and 19 ignorance
+levels, the law holds to a mean absolute error of **0.022** in `γ` (grid step
+0.05). The residual is the `Σ_slow x²` term, which is exactly the term the
+ignorance paper argues is subleading at large `L`.
+
+### 10. How you deliver altruism changes when it backfires
+
+The derivation above is for a uniform `γ`, but this repo's main model uses a
+*fraction* `α` of fully-altruistic drivers. These are **not** equivalent, and the
+difference is measurable:
+
+| instrument | measured `ω` where a small dose stops helping |
+|---|---|
+| uniform `γ` — everyone mildly altruistic | **0.66** (analytic: `2/3` = 0.667) |
+| fraction `α` — a few full altruists | **0.50** |
+
+Spreading a little altruism over everyone keeps helping ~0.17 further in `ω`
+than concentrating it in a few drivers. Concentrated altruists dump their entire
+correction onto the handful of paths they take, overshooting there while leaving
+the rest of the network untouched — a worse instrument for the same total amount
+of altruism.
+
+This also resolves an apparent contradiction. The threshold where the *first*
+altruists stop helping (`ω ≈ 0.50`) is strictly below the `ω ≈ 0.68` that
+minimises `C` for a purely selfish population. Both are correct: at the
+cost-minimising `ω` any perturbation must raise `C`, so the flip is *guaranteed*
+by then — but it can happen earlier, because the altruists' correction is not
+aligned with whatever error remains.
+
 ## Caveats
 
 * Costs are affine (`c = 1` or `c = x`), matching the paper. Roughgarden–Tardos
@@ -229,6 +386,14 @@ has a visibly more even flow distribution than the equilibrium.
   taking others' choices as given. A central planner who anticipated the selfish
   response (Stackelberg routing) would do better, and is a bilevel problem, not
   a QP.
+* Ignorance is modelled as a *bias*, not as noise: every driver blends the two
+  cost functions the same way, rather than each drawing an independent wrong
+  guess. That is the ignorance paper's own construction, and it is what keeps
+  perceived costs affine and the problem a QP.
+* `γ*(ω)` is derived by dropping the `Σ_slow x²` term. That term is subleading
+  in `L` (the ignorance paper's argument), which is why the law is accurate to
+  ~0.02 rather than exact, with the largest deviation at small `p` where the most
+  traffic sits on slow roads.
 * The boundary condition is the paper's circuit analogy: left and right
   boundaries are equipotential busbars. `entry="uniform"` forces `1/L` in at each
   left vertex instead; results are qualitatively identical (tested).

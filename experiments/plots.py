@@ -23,8 +23,8 @@ from poi.metrics import efficiency, saturation_alpha  # noqa: E402
 from poi.sweep import load  # noqa: E402
 from style import (  # noqa: E402
     AQUA, AXIS, BLUE, DIVERGING, GRID, INK, INK_2, MUTED, ORANGE, RED, SEQ_BLUE,
-    SEQ_ORANGE, SERIES, SURFACE, VIOLET, band, direct_label, mean_sem, nanmean,
-    ordinal, pc_line, use_style,
+    ORANGE_RAMP, SEQ_ORANGE, SERIES, SURFACE, VIOLET, band, direct_label, mean_sem,
+    nanmean, ordinal, pc_line, use_style,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -584,6 +584,347 @@ ALL = {
     "backfire": fig_backfire,
     "maps": fig_traffic_maps,
 }
+
+
+
+# ==================== user-ignorance extension (arXiv:2503.09684) ==========
+# omega = ignorance level (that paper's alpha); alpha = altruistic fraction.
+
+OMEGA_STAR = 2.0 / 3.0
+
+
+def gamma_star(omega):
+    """Uniform altruism that exactly offsets ignorance ``omega``."""
+    return (2 - 3 * np.asarray(omega, dtype=float)) / (2 - np.asarray(omega, dtype=float))
+
+
+# ---------------------------------------------------------------- figure 9 --
+def fig_ignorance_surface():
+    """Reproduction of the ignorance paper: the price of ignorance over (p, omega)."""
+    d = load(os.path.join(RESULTS, "ignorance_surface.npz"))
+    p, w, pc = d["p"], d["omega"], float(d["pc"])
+    C = d["C"][:, :, :, 0]
+    PI = nanmean(C / C[:, [0], :], axis=2)  # normalise each network to its own omega=0
+
+    fig, axes = plt.subplots(2, 2, figsize=(10.4, 7.0))
+    axes = axes.ravel()
+
+    ax = axes[0]
+    v = 0.05
+    im = ax.imshow(
+        PI.T, origin="lower", aspect="auto", extent=[p[0], p[-1], w[0], w[-1]],
+        cmap=DIVERGING, vmin=1 - v, vmax=1 + v,
+    )
+    cs = ax.contour(p, w, PI.T, levels=[1.0], colors=[INK], linewidths=1.4)
+    fig.colorbar(im, ax=ax, label="price of ignorance $P_I$")
+    ax.axvline(pc, color="white", lw=1.0, ls=(0, (4, 3)))
+    ax.axhline(OMEGA_STAR, color="white", lw=1.0, ls=(0, (2, 2)))
+    ax.text(pc, 0.02, r" $p_c$", color="white", fontsize=8, fontweight="bold")
+    ax.text(0.30, OMEGA_STAR, r"$\omega=2/3$", color="white", fontsize=8,
+            va="bottom", fontweight="bold")
+    ax.set_xlabel("fraction of congestible roads, $p$")
+    ax.set_ylabel(r"ignorance $\omega$")
+    ax.set_title("(a)  Blue = ignorance helps", loc="left")
+    ax.grid(False)
+
+    ax = axes[1]
+    for i, (om, c) in enumerate(zip([0.25, OMEGA_STAR, 0.9], SERIES)):
+        j = int(np.argmin(abs(w - om)))
+        ax.plot(p, PI[:, j], color=c)
+        direct_label(ax, 0.30, PI[int(np.argmin(abs(p - 0.30))), j],
+                     rf"$\omega={w[j]:.2f}$", c, dy=[8, -9, 8][i])
+    ax.axhline(1.0, color=MUTED, lw=0.9, ls=(0, (4, 3)))
+    pc_line(ax, pc)
+    ax.set_xlabel("fraction of congestible roads, $p$")
+    ax.set_ylabel("price of ignorance $P_I$")
+    ax.set_title(r"(b)  Deepest benefit sits at $p_c$", loc="left")
+
+    ax = axes[2]
+    j = int(np.argmin(abs(p - pc)))
+    ax.plot(w, PI[j], color=BLUE)
+    ax.axhline(1.0, color=MUTED, lw=0.9, ls=(0, (4, 3)))
+    ax.axvline(OMEGA_STAR, color=AXIS, lw=0.9, ls=(0, (2, 2)))
+    ax.plot([w[np.argmin(PI[j])]], [PI[j].min()], "o", color=BLUE, ms=5, zorder=4)
+    ax.annotate(
+        rf"min $P_I={PI[j].min():.3f}$" "\n" rf"at $\omega={w[np.argmin(PI[j])]:.2f}$",
+        xy=(w[np.argmin(PI[j])], PI[j].min()), xytext=(0.30, 0.55),
+        textcoords="axes fraction", color=INK_2, fontsize=7.5,
+        arrowprops=dict(arrowstyle="->", color=MUTED, lw=0.9, shrinkA=2, shrinkB=4),
+    )
+    ax.set_xlabel(r"ignorance $\omega$")
+    ax.set_ylabel("price of ignorance $P_I$")
+    ax.set_title(r"(c)  A cut at $p=p_c$", loc="left")
+    # Total ignorance is catastrophic, which would flatten the dip off-scale.
+    ax.set_ylim(0.94, 1.09)
+    ax.text(
+        0.99, 1.085, f"$P_I\\to{PI[j][-1]:.1f}$\nat $\\omega=1$ (off scale)",
+        color=RED, fontsize=7.5, ha="right", va="top",
+    )
+
+    ax = axes[3]
+    dz = load(os.path.join(RESULTS, "ignorance_sizes.npz"))
+    pz = dz["p"]
+    for L, c in zip(dz["Ls"], ordinal(len(dz["Ls"]))):
+        m, se = mean_sem(dz[f"PI_L{L}"], axis=1)
+        ax.plot(pz, m, color=c, label=f"L = {L}")
+        band(ax, pz, m - se, m + se, c)
+    ax.axhline(1.0, color=MUTED, lw=0.9, ls=(0, (4, 3)))
+    pc_line(ax, pc)
+    ax.set_xlabel("fraction of congestible roads, $p$")
+    ax.set_ylabel("price of ignorance $P_I$")
+    ax.set_title(r"(d)  At $\omega=2/3$ the dip narrows with $L$", loc="left")
+    ax.legend(loc="lower left", ncol=2)
+
+    fig.suptitle(
+        "Reproducing the benefit of ignorance (arXiv:2503.09684)",
+        x=0.008, y=0.99, ha="left", fontsize=12, fontweight="bold", color=INK,
+    )
+    fig.text(
+        0.008, 0.955,
+        r"Selfish drivers who cannot tell fast roads from slow ones stop piling onto the fast ones; below $\omega=2/3$ that helps at every $p$.",
+        ha="left", fontsize=8.5, color=INK_2,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    _save(fig, "fig9_ignorance_surface.png")
+
+
+# --------------------------------------------------------------- figure 10 --
+def fig_joint_surface():
+    """The new result: altruism reverses sign once drivers are ignorant enough."""
+    d = load(os.path.join(RESULTS, "joint_surface.npz"))
+    p, w, al, pc = d["p"], d["omega"], d["alpha"], float(d["pc"])
+    C = nanmean(d["C"], axis=2)  # (p, omega, alpha)
+
+    fig, axes = plt.subplots(1, 3, figsize=(13.0, 4.0))
+    titles = [r"(a)  $p=0.45$ (below $p_c$)", r"(b)  $p=p_c$", r"(c)  $p=0.85$ (above $p_c$)"]
+
+    for i, (ax, title) in enumerate(zip(axes, titles)):
+        # Percent above the cheapest point of this plane. Total ignorance is
+        # catastrophic and would flatten everything else, so the scale is capped
+        # at the 88th percentile (note the extended colour bar).
+        rel = 100.0 * (C[i] / C[i].min() - 1.0)
+        top = float(np.nanpercentile(rel, 88)) or 1.0
+        im = ax.imshow(
+            rel.T, origin="lower", aspect="auto",
+            extent=[w[0], w[-1], al[0], al[-1]],
+            cmap=SEQ_ORANGE, vmin=0.0, vmax=top,
+        )
+        fig.colorbar(im, ax=ax, label="% slower than the best mix", extend="max")
+        # The empirical ridge: the best altruistic fraction at each ignorance level.
+        ridge = al[np.argmin(rel, axis=1)]
+        ax.plot(w, ridge, color=INK, lw=1.2, marker="o", ms=2.6,
+                markerfacecolor=SURFACE, markeredgewidth=0.7, zorder=4)
+        jmin = np.unravel_index(np.argmin(rel), rel.shape)
+        ax.plot([w[jmin[0]]], [al[jmin[1]]], "*", color="white", ms=15,
+                markeredgecolor=INK, markeredgewidth=0.9, zorder=6)
+        ax.axvline(OMEGA_STAR, color="white", lw=1.1, ls=(0, (3, 2)))
+        ax.set_xlabel(r"ignorance $\omega$")
+        ax.set_title(title, loc="left")
+        ax.set_xlim(w[0], w[-1])
+        ax.set_ylim(0, 1)
+        ax.grid(False)
+
+    axes[0].set_ylabel(r"altruistic fraction $\alpha$")
+    axes[0].text(
+        0.03, 0.06, "line: best $\\alpha$ at each $\\omega$\n$\\star$: cheapest mix overall",
+        transform=axes[0].transAxes, fontsize=7.5, color=INK, va="bottom",
+    )
+    axes[1].text(
+        OMEGA_STAR - 0.02, 0.5, r"$\omega=2/3$", color="white", fontsize=8,
+        rotation=90, ha="right", va="center", fontweight="bold",
+    )
+
+    fig.suptitle(
+        "Altruism and ignorance are substitutes: using both at once overshoots",
+        x=0.008, y=0.99, ha="left", fontsize=12, fontweight="bold", color=INK,
+    )
+    fig.text(
+        0.008, 0.93,
+        "Darker is slower. The best altruistic fraction falls to zero as ignorance rises: by "
+        r"$\omega \approx 2/3$ the ignorant selfish are already doing the job, and altruists only add error.",
+        ha="left", fontsize=8.5, color=INK_2,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.90))
+    _save(fig, "fig10_joint_surface.png")
+
+
+# --------------------------------------------------------------- figure 11 --
+def fig_altruism_reversal():
+    """Where altruism flips sign, and why the two thresholds differ.
+
+    Two different questions have two different answers, and conflating them is
+    easy.  For a *uniform* population at altruism level gamma, the first
+    increment stops helping exactly where gamma*(omega) = 0, i.e. omega = 2/3.
+    For a *fraction* of fully-altruistic drivers there is no such guarantee, and
+    the flip happens much earlier, near omega ~ 0.45.
+    """
+    dj = load(os.path.join(RESULTS, "joint_surface.npz"))
+    ds = load(os.path.join(RESULTS, "sign_boundary.npz"))
+    w, al = dj["omega"], dj["alpha"]
+    C = nanmean(dj["C"], axis=2)
+    ip = int(np.argmin(abs(dj["p"] - float(dj["pc"]))))
+
+    fig, axes = plt.subplots(1, 3, figsize=(12.8, 3.9))
+
+    # (a) the cost curves themselves
+    ax = axes[0]
+    picks = [0.0, 0.35, 2 / 3, 0.85]
+    cols = ordinal(len(picks), ramp=ORANGE_RAMP)
+    for om, c in zip(picks, cols):
+        j = int(np.argmin(abs(w - om)))
+        ax.plot(al, C[ip, j], color=c, label=rf"$\omega={w[j]:.2f}$")
+    ax.set_xlabel(r"altruistic fraction $\alpha$")
+    ax.set_ylabel("true average commute time $C$")
+    ax.set_title(r"(a)  Adding altruists, at $p=p_c$", loc="left")
+    ax.legend(loc="center right", title="ignorance", fontsize=7.5, title_fontsize=8)
+    jd = int(np.argmin(abs(w - 0.85)))
+    ax.annotate(
+        "heavy ignorance:\naltruists make it worse",
+        xy=(0.62, C[ip, jd][int(0.62 * (al.size - 1))]), xytext=(0.05, 0.97),
+        textcoords="axes fraction", color=RED, fontsize=7.5, va="top",
+        arrowprops=dict(arrowstyle="->", color=RED, lw=0.9, shrinkA=2, shrinkB=5),
+    )
+    ax.annotate(
+        "accurate knowledge:\nthey still help",
+        xy=(0.72, C[ip, 0][int(0.72 * (al.size - 1))]), xytext=(0.05, 0.16),
+        textcoords="axes fraction", color=INK_2, fontsize=7.5,
+        arrowprops=dict(arrowstyle="->", color=MUTED, lw=0.9, shrinkA=2, shrinkB=5),
+    )
+
+    # (b) the two instruments have two different thresholds
+    ax = axes[1]
+    try:
+        di = load(os.path.join(RESULTS, "instruments.npz"))
+        wi, pi_ = di["omega"], di["p"]
+        k = int(np.argmin(abs(pi_ - float(di["pc"]))))
+        for arr, c, lab in [
+            (di["dU"][k], BLUE, r"uniform $\gamma$ (everyone mildly altruistic)"),
+            (di["dF"][k], ORANGE, r"fraction $\alpha$ (a few full altruists)"),
+        ]:
+            y = arr / di["C0"][k]
+            ax.plot(wi, 100 * y, color=c, label=lab)
+            f = np.flatnonzero(y > 0)
+            if f.size and f[0] > 0:
+                xc = np.interp(0, [y[f[0] - 1], y[f[0]]], [wi[f[0] - 1], wi[f[0]]])
+                ax.plot([xc], [0], "o", color=c, ms=6, zorder=5)
+                ax.annotate(
+                    rf"$\omega_c={xc:.2f}$", (xc, 0), textcoords="offset points",
+                    xytext=(0, -16 if c is ORANGE else 12), color=c, fontsize=8,
+                    fontweight="bold", ha="center",
+                )
+        ax.axvline(2 / 3, color=AXIS, lw=0.9, ls=(0, (2, 2)))
+        ax.text(2 / 3, 0.03, r" $\omega=2/3$", transform=ax.get_xaxis_transform(),
+                color=INK_2, fontsize=8, va="bottom")
+        ax.axhline(0.0, color=INK, lw=1.0)
+        ax.legend(loc="upper left")
+        ax.set_ylim(-0.6, 1.4)
+    except FileNotFoundError:
+        ax.text(0.5, 0.5, "run compute.py instruments", ha="center", transform=ax.transAxes)
+    ax.set_xlabel(r"ignorance $\omega$")
+    ax.set_ylabel("% change in $C$ from a small dose")
+    ax.set_title("(b)  How you deliver altruism matters", loc="left")
+
+    # (c) sign boundary across the (p, omega) plane
+    ax = axes[2]
+    ps, ws = ds["p"], ds["omega"]
+    Cs = nanmean(ds["C"], axis=2)
+    delta = Cs[:, :, -1] - Cs[:, :, 0]  # C(alpha=1) - C(alpha=0)
+    rel = 100 * delta / Cs[:, :, 0]
+    v = float(np.nanpercentile(np.abs(rel), 97))
+    im = ax.imshow(
+        rel.T, origin="lower", aspect="auto",
+        extent=[ps[0], ps[-1], ws[0], ws[-1]], cmap=DIVERGING,
+        vmin=-v, vmax=v,
+    )
+    ax.contour(ps, ws, delta.T, levels=[0.0], colors=[INK], linewidths=1.6)
+    fig.colorbar(im, ax=ax, label=r"% change in $C$, $\alpha:0\to1$", extend="both")
+    ax.axvline(float(ds["pc"]), color="white", lw=1.0, ls=(0, (4, 3)))
+    ax.text(0.07, 0.10, "altruism\nhelps", color=INK, fontsize=8.5, fontweight="bold")
+    ax.text(0.55, 0.76, "altruism\nhurts", color="white", fontsize=8.5, fontweight="bold")
+    ax.set_xlabel("fraction of congestible roads, $p$")
+    ax.set_ylabel(r"ignorance $\omega$")
+    ax.set_title("(c)  Where altruism backfires", loc="left")
+    ax.grid(False)
+
+    fig.suptitle(
+        r"Once drivers are ignorant enough, recruiting altruists makes traffic worse",
+        x=0.008, y=0.99, ha="left", fontsize=12, fontweight="bold", color=INK,
+    )
+    fig.text(
+        0.008, 0.93,
+        "Ignorance already does the job altruism was doing, so altruists over-correct. Where the flip happens "
+        r"depends on how altruism is delivered: $\omega=2/3$ if spread thinly over everyone, but only "
+        r"$\omega \approx 0.4$–$0.5$ if concentrated in a few drivers.",
+        ha="left", fontsize=8.5, color=INK_2,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.89))
+    _save(fig, "fig11_altruism_reversal.png")
+
+
+# --------------------------------------------------------------- figure 12 --
+def fig_substitution():
+    """The closed-form trade-off between altruism and ignorance."""
+    d = load(os.path.join(RESULTS, "substitution.npz"))
+    p, w, g, C, Copt = d["p"], d["omega"], d["gamma"], d["C"], d["Copt"]
+
+    fig, axes = plt.subplots(1, 2, figsize=(10.4, 4.0))
+
+    ax = axes[0]
+    ww = np.linspace(0, 0.95, 200)
+    ax.plot(ww, gamma_star(ww), color=INK, lw=1.6, ls=(0, (5, 2)), zorder=1,
+            label=r"$\gamma^*=(2-3\omega)/(2-\omega)$")
+    cols = ordinal(len(p))
+    for i, c in enumerate(cols):
+        meas = g[np.argmin(C[i], axis=1)]
+        ax.plot(w, meas, "o", color=c, ms=4.5, label=f"$p={p[i]:.2f}$", zorder=3)
+    ax.axhline(0.0, color=MUTED, lw=0.9)
+    ax.axvline(OMEGA_STAR, color=AXIS, lw=0.9, ls=(0, (2, 2)))
+    ax.text(OMEGA_STAR, 0.03, r" $\omega=2/3$", color=INK_2, fontsize=8,
+            transform=ax.get_xaxis_transform(), va="bottom")
+    ax.text(0.03, -0.62, "past $\\omega=2/3$ the optimal\n$\\gamma$ is negative: you would\nneed spite, not altruism",
+            color=RED, fontsize=7.5, va="top")
+    ax.set_xlabel(r"ignorance $\omega$")
+    ax.set_ylabel(r"cost-minimising altruism level $\gamma$")
+    ax.set_title("(a)  Measured optimum lands on the predicted curve", loc="left")
+    ax.legend(loc="upper right")
+
+    ax = axes[1]
+    i = int(np.argmin(abs(p - float(d["pc"]))))
+    for om, c in zip([0.0, 1 / 3, OMEGA_STAR, 0.9], ordinal(4, ramp=ORANGE_RAMP)):
+        j = int(np.argmin(abs(w - om)))
+        ax.plot(g, C[i, j] / Copt[i], color=c, label=rf"$\omega={w[j]:.2f}$")
+        ax.plot([gamma_star(w[j])], [np.interp(gamma_star(w[j]), g, C[i, j] / Copt[i])],
+                "o", color=c, ms=6, zorder=5, markeredgecolor=INK, markeredgewidth=0.7)
+    ax.axhline(1.0, color=MUTED, lw=0.9, ls=(0, (4, 3)))
+    ax.text(g[-1], 1.002, "true social optimum ", color=INK_2, fontsize=8,
+            va="bottom", ha="right")
+    ax.set_xlabel(r"uniform altruism level $\gamma$")
+    ax.set_ylabel(r"$C\,/\,C_{\rm opt}$")
+    ax.set_title(r"(b)  Each curve bottoms out at its $\gamma^*$ (dots)", loc="left")
+    ax.legend(loc="upper center", ncol=2)
+    ax.set_ylim(0.993, None)
+
+    fig.suptitle(
+        "One knob, not two: ignorance and altruism trade off along a straight-line law",
+        x=0.008, y=0.99, ha="left", fontsize=12, fontweight="bold", color=INK,
+    )
+    fig.text(
+        0.008, 0.925,
+        r"Rescaling the perceived objective shows the optimum is reached whenever "
+        r"$(1+\gamma)(1-\omega/2) = 2(1-\omega)$, i.e. $\gamma^*=(2-3\omega)/(2-\omega)$.",
+        ha="left", fontsize=8.5, color=INK_2,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.90))
+    _save(fig, "fig12_substitution.png")
+
+
+ALL.update({
+    "ignorance": fig_ignorance_surface,
+    "joint": fig_joint_surface,
+    "reversal": fig_altruism_reversal,
+    "substitution": fig_substitution,
+})
+
 
 if __name__ == "__main__":
     os.makedirs(FIGURES, exist_ok=True)

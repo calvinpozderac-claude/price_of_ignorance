@@ -189,6 +189,22 @@ def altruism_sign_boundary():
     save(os.path.join(RESULTS, "sign_boundary.npz"), g)
 
 
+def _subst_job(args):
+    """One disorder realisation: C over the (omega, gamma) grid, plus its optimum."""
+    from poi.ignorance import perceive
+    from poi.qp import solve_uniform
+    from poi import solve_single_class
+
+    L, p, seed, omegas, gammas = args
+    net = square_lattice(L, float(p), rng=seed)
+    C = np.empty((omegas.size, gammas.size))
+    for j, w in enumerate(omegas):
+        q = perceive(net, float(w))
+        for k, gm in enumerate(gammas):
+            C[j, k] = net.total_cost(solve_uniform(q, float(gm)))
+    return p, seed, C, solve_single_class(net, "optimum")[1]
+
+
 def substitution_curve():
     """Numerically locate the cost-minimising uniform altruism gamma*(omega).
 
@@ -196,26 +212,25 @@ def substitution_curve():
     ignorance are substitutes, and past omega = 2/3 the optimal gamma is negative.
     """
     _banner("Altruism-ignorance substitution curve")
-    from poi.ignorance import perceive
-    from poi.qp import solve_uniform
-    from poi import solve_single_class
+    from concurrent.futures import ProcessPoolExecutor
 
     ps = np.array([0.30, 0.45, PC_SQUARE, 0.85])
     omegas = np.linspace(0.0, 0.9, 19)
-    gammas = np.linspace(-0.8, 1.4, 111)
-    n_seeds = 16
-    L = 20
+    gammas = np.linspace(-0.8, 1.4, 45)
+    n_seeds, L = 24, 16
     C = np.zeros((ps.size, omegas.size, gammas.size))
     Copt = np.zeros(ps.size)
-    for i, p in enumerate(ps):
-        for seed in range(n_seeds):
-            net = square_lattice(L, float(p), rng=seed)
-            Copt[i] += solve_single_class(net, "optimum")[1] / n_seeds
-            for j, w in enumerate(omegas):
-                q = perceive(net, float(w))
-                for k, gm in enumerate(gammas):
-                    C[i, j, k] += net.total_cost(solve_uniform(q, float(gm))) / n_seeds
-        print(f"  p = {p:.4f} done", flush=True)
+    idx = {float(v): i for i, v in enumerate(ps)}
+    jobs = [(L, float(p), s, omegas, gammas) for p in ps for s in range(n_seeds)]
+    done = 0
+    with ProcessPoolExecutor(max_workers=n_workers()) as ex:
+        for p, seed, c, copt in ex.map(_subst_job, jobs, chunksize=1):
+            i = idx[p]
+            C[i] += c / n_seeds
+            Copt[i] += copt / n_seeds
+            done += 1
+            if done % 8 == 0:
+                print(f"  [{done}/{len(jobs)}]", flush=True)
     save(
         os.path.join(RESULTS, "substitution.npz"),
         {"p": ps, "omega": omegas, "gamma": gammas, "C": C, "Copt": Copt,
@@ -230,6 +245,64 @@ ALL.update({
     "sign_boundary": altruism_sign_boundary,
     "substitution": substitution_curve,
 })
+
+
+def _instr_job(args):
+    """One realisation: baseline cost and the effect of each small altruism dose."""
+    from poi.ignorance import perceive, solve_ignorant
+    from poi.qp import solve_uniform
+
+    L, p, seed, omegas, step = args
+    net = square_lattice(L, float(p), rng=seed)
+    C0 = np.empty(omegas.size)
+    dU = np.empty(omegas.size)
+    dF = np.empty(omegas.size)
+    for j, w in enumerate(omegas):
+        q = perceive(net, float(w))
+        C0[j] = net.total_cost(solve_uniform(q, 0.0))
+        dU[j] = net.total_cost(solve_uniform(q, step)) - C0[j]
+        dF[j] = solve_ignorant(net, float(w), step).total_cost - C0[j]
+    return p, C0, dU, dF
+
+
+def instrument_comparison():
+    """Two ways to deliver altruism: a few full altruists, or everyone mildly so.
+
+    The uniform-gamma model has an analytic threshold: the first increment of
+    altruism stops helping exactly where gamma*(omega) = 0, i.e. omega = 2/3.
+    The fraction-alpha model has no such guarantee, and gives up much earlier --
+    concentrating the whole correction on a few drivers overshoots on the paths
+    those drivers take.
+    """
+    _banner("Uniform-gamma versus fraction-alpha as instruments")
+    from concurrent.futures import ProcessPoolExecutor
+
+    ps = np.array([0.30, 0.45, PC_SQUARE, 0.85])
+    omegas = np.linspace(0.02, 0.94, 47)
+    L, n_seeds, step = 18, 32, 0.05
+    C0 = np.zeros((ps.size, omegas.size))
+    dU = np.zeros((ps.size, omegas.size))
+    dF = np.zeros((ps.size, omegas.size))
+    idx = {float(v): i for i, v in enumerate(ps)}
+    jobs = [(L, float(p), s, omegas, step) for p in ps for s in range(n_seeds)]
+    done = 0
+    with ProcessPoolExecutor(max_workers=n_workers()) as ex:
+        for p, c0, du, df in ex.map(_instr_job, jobs, chunksize=1):
+            i = idx[p]
+            C0[i] += c0 / n_seeds
+            dU[i] += du / n_seeds
+            dF[i] += df / n_seeds
+            done += 1
+            if done % 8 == 0:
+                print(f"  [{done}/{len(jobs)}]", flush=True)
+    save(
+        os.path.join(RESULTS, "instruments.npz"),
+        {"p": ps, "omega": omegas, "C0": C0, "dU": dU, "dF": dF,
+         "L": L, "n_seeds": n_seeds, "step": step, "pc": PC_SQUARE},
+    )
+
+
+ALL["instruments"] = instrument_comparison
 
 
 if __name__ == "__main__":
