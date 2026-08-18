@@ -19,11 +19,12 @@ from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 
+from .ignorance import perceive
 from .lattice import square_lattice, bcc_lattice, uniform_entry_demand
 from .metrics import summarise_curve
 from .qp import solve_mixed
 
-__all__ = ["alpha_sweep", "run_grid", "save", "load", "n_workers"]
+__all__ = ["alpha_sweep", "run_grid", "run_grid3", "save", "load", "n_workers"]
 
 
 def n_workers() -> int:
@@ -38,13 +39,18 @@ def _build(lattice: str, L: int, p: float, seed: int, entry: str):
     raise ValueError(f"unknown lattice {lattice!r}")
 
 
-def alpha_sweep(net, alphas, demand=None) -> dict:
-    """Solve one fixed network at every altruistic fraction in ``alphas``."""
+def alpha_sweep(net, alphas, demand=None, omega: float = 0.0) -> dict:
+    """Solve one fixed network at every altruistic fraction in ``alphas``.
+
+    ``omega`` is the user-ignorance level: drivers plan against
+    ``perceive(net, omega)`` while outcomes are scored with the true ``net``.
+    """
     alphas = np.asarray(alphas, dtype=float)
+    percv = net if omega == 0.0 else perceive(net, omega)
     out = {k: np.empty(alphas.size) for k in ("C", "CA", "CS", "mu_S", "mu_A", "resid")}
     ok = True
     for i, al in enumerate(alphas):
-        s = solve_mixed(net, al, demand=demand)
+        s = solve_mixed(percv, al, demand=demand, true_net=net)
         ok &= s.status == "Solved"
         out["C"][i] = s.total_cost
         out["CA"][i] = s.cost_altruist
@@ -141,3 +147,75 @@ def save(path, data: dict) -> None:
 def load(path) -> dict:
     with np.load(path, allow_pickle=True) as z:
         return {k: z[k] for k in z.files}
+
+
+def _task3(args):
+    lattice, L, p, omega, seed, alphas, entry = args
+    net = _build(lattice, L, p, seed, entry)
+    demand = uniform_entry_demand(net) if entry == "uniform" else None
+    return (p, omega, seed, alpha_sweep(net, alphas, demand=demand, omega=omega))
+
+
+def run_grid3(
+    ps,
+    omegas,
+    alphas,
+    L: int = 20,
+    n_seeds: int = 24,
+    lattice: str = "square",
+    entry: str = "busbar",
+    seed0: int = 0,
+    workers: int | None = None,
+    progress: bool = True,
+) -> dict:
+    """Sweep the ``(p, omega, seed, alpha)`` grid in parallel.
+
+    Returns ``C``, ``CA``, ``CS`` of shape ``(n_p, n_omega, n_seeds, n_alpha)``.
+    The same random network is reused across every ``omega`` and ``alpha`` for a
+    given ``(p, seed)``, so the two parameter dependences are measured within a
+    fixed road layout.
+    """
+    ps = np.asarray(ps, dtype=float)
+    omegas = np.asarray(omegas, dtype=float)
+    alphas = np.asarray(alphas, dtype=float)
+    workers = workers or n_workers()
+
+    jobs = [
+        (lattice, L, float(p), float(w), seed0 + s, alphas, entry)
+        for p, w, s in itertools.product(ps, omegas, range(n_seeds))
+    ]
+    shape = (ps.size, omegas.size, n_seeds, alphas.size)
+    C = np.full(shape, np.nan)
+    CA = np.full(shape, np.nan)
+    CS = np.full(shape, np.nan)
+    pi = {float(v): i for i, v in enumerate(ps)}
+    wi = {float(v): i for i, v in enumerate(omegas)}
+
+    t0 = time.time()
+    done = 0
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        for p, w, seed, res in ex.map(_task3, jobs, chunksize=1):
+            i, j, k = pi[p], wi[w], seed - seed0
+            C[i, j, k] = res["C"]
+            CA[i, j, k] = res["CA"]
+            CS[i, j, k] = res["CS"]
+            done += 1
+            if progress and (done % max(1, len(jobs) // 30) == 0 or done == len(jobs)):
+                el = time.time() - t0
+                print(
+                    f"  [{done}/{len(jobs)}] {el:6.1f}s  eta {el/done*(len(jobs)-done):6.1f}s",
+                    flush=True,
+                )
+
+    return {
+        "p": ps,
+        "omega": omegas,
+        "alpha": alphas,
+        "L": L,
+        "n_seeds": n_seeds,
+        "lattice": lattice,
+        "C": C,
+        "CA": CA,
+        "CS": CS,
+        "elapsed": time.time() - t0,
+    }

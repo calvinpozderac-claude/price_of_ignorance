@@ -37,7 +37,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-__all__ = ["PigouSolution", "solve_pigou", "pigou_curves"]
+__all__ = ["PigouSolution", "solve_pigou", "solve_pigou_ignorant", "pigou_curves"]
 
 
 @dataclass
@@ -70,40 +70,60 @@ def solve_pigou(alpha: float, k: float = 1.0, a: float = 0.0, b: float = 1.0) ->
     if a >= k:
         raise ValueError("road 2 must be faster when empty (a < k)")
 
-    x_eq = min(1.0, (k - a) / b)
-    x_opt = min(1.0, (k - a) / (2.0 * b))
-    alpha_star = 1.0 - x_opt
+    return _two_road(alpha, k, 0.0, a, b, (k, 0.0), (a, b))
 
-    if 1.0 - alpha > x_eq:
+
+def _two_road(alpha, A1, B1, A2, B2, T1, T2):
+    """Shared regime logic for two parallel roads.
+
+    ``(A_i, B_i)`` are the *perceived* affine coefficients drivers plan against;
+    ``T_i = (a_i, b_i)`` are the *true* ones that determine commute times.  Road
+    1 is the slow road, road 2 the fast one.
+
+    Selfish drivers equalise perceived cost ``A_i + B_i x_i``; altruists equalise
+    perceived marginal cost ``A_i + 2 B_i x_i``.  Solving each on ``x_1 + x_2 = 1``:
+
+        x2_S = (A1 + B1 - A2) / (B1 + B2)          selfish indifference point
+        x2_A = (A1 + 2 B1 - A2) / (2 (B1 + B2))    altruist indifference point
+
+    and ``x2_S - x2_A = (A1 - A2) / (2 (B1 + B2))``, so the selfish always want
+    at least as much of road 2 as the altruists whenever ``A1 >= A2`` -- i.e.
+    whenever road 1 really is the one that looks slower when empty.
+    """
+    denom = B1 + B2
+    if denom <= 0:
+        raise ValueError("at least one road must be congestible in perceived terms")
+    x2_S = float(np.clip((A1 + B1 - A2) / denom, 0.0, 1.0))
+    x2_A = float(np.clip((A1 + 2 * B1 - A2) / (2 * denom), 0.0, 1.0))
+    alpha_star = 1.0 - x2_A
+
+    if 1.0 - alpha > x2_S:
         # Road 2 saturates on selfish drivers alone; the rest spill onto road 1,
-        # which by construction is exactly as fast, so both classes see cost k.
+        # which by construction then has equal perceived cost.
         regime = "saturated"
-        x_fast = x_eq
-        fS_fast, fA_fast = x_eq, 0.0
-        fS_slow, fA_slow = (1.0 - alpha) - x_eq, alpha
+        x_fast = x2_S
+        fS_fast, fA_fast = x2_S, 0.0
+        fS_slow, fA_slow = (1.0 - alpha) - x2_S, alpha
     elif alpha < alpha_star:
-        # Altruists have all retreated to the slow road.
         regime = "retreat"
         x_fast = 1.0 - alpha
         fS_fast, fS_slow = 1.0 - alpha, 0.0
         fA_fast, fA_slow = 0.0, alpha
     else:
-        # Enough altruists that they can top road 2 up to its optimal usage.
         regime = "optimal"
-        x_fast = x_opt
+        x_fast = x2_A
         fS_fast, fS_slow = 1.0 - alpha, 0.0
-        fA_fast = x_opt - (1.0 - alpha)
+        fA_fast = x2_A - (1.0 - alpha)
         fA_slow = alpha - fA_fast
 
     x_slow = 1.0 - x_fast
-    c_slow = k
-    c_fast = a + b * x_fast
+    c_slow = T1[0] + T1[1] * x_slow  # true commute times
+    c_fast = T2[0] + T2[1] * x_fast
     total = x_slow * c_slow + x_fast * c_fast
     cost_A = (fA_slow * c_slow + fA_fast * c_fast) / alpha if alpha > 0 else float("nan")
     cost_S = (
         (fS_slow * c_slow + fS_fast * c_fast) / (1.0 - alpha) if alpha < 1 else float("nan")
     )
-
     return PigouSolution(
         alpha=float(alpha),
         x_slow=x_slow,
@@ -117,6 +137,27 @@ def solve_pigou(alpha: float, k: float = 1.0, a: float = 0.0, b: float = 1.0) ->
         cost_selfish=cost_S,
         regime=regime,
     )
+
+
+def solve_pigou_ignorant(alpha: float, omega: float) -> PigouSolution:
+    """Pigou's two roads with both altruism ``alpha`` and ignorance ``omega``.
+
+    True costs are ``c_1 = 1`` and ``c_2 = x``.  With ``u = omega / 2`` the
+    perceived costs are ``(1 - u) + u x`` on the slow road and ``u + (1 - u) x``
+    on the fast one, so ``B1 + B2 = 1`` and
+
+        x2_S = 1 - u          (selfish target -- the paper's 1 - omega/2)
+        x2_A = 1/2            (altruist target)
+
+    The altruists' target is ``1/2`` for **every** ``omega``: in this network the
+    minimiser of the *perceived* total cost coincides exactly with the minimiser
+    of the true one.  Ignorance therefore never corrupts an altruist's aim here,
+    which is special to Pigou -- on the lattice it does.
+    """
+    if not 0.0 <= omega <= 1.0:
+        raise ValueError("omega must lie in [0, 1]")
+    u = 0.5 * omega
+    return _two_road(alpha, 1.0 - u, u, u, 1.0 - u, (1.0, 0.0), (0.0, 1.0))
 
 
 def pigou_curves(alphas, k: float = 1.0, a: float = 0.0, b: float = 1.0) -> dict:

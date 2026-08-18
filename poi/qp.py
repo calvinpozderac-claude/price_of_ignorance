@@ -54,7 +54,7 @@ import scipy.sparse as sp
 
 from .lattice import Network
 
-__all__ = ["Solution", "solve_mixed", "solve_single_class", "cost_range"]
+__all__ = ["Solution", "solve_mixed", "solve_single_class", "solve_uniform", "cost_range"]
 
 # Ridge weight that breaks ties among equivalent equilibria without measurably
 # moving the solution (costs here are O(1) .. O(L)).
@@ -113,13 +113,16 @@ def solve_mixed(
     ridge: float = DEFAULT_RIDGE,
     tol: float = 1e-12,
     verbose: bool = False,
+    true_net: Network | None = None,
 ) -> Solution:
     """Solve the mixed altruistic/selfish equilibrium on ``net``.
 
     Parameters
     ----------
     net:
-        Network with affine costs.
+        Network whose affine costs drivers *respond to*.  Under user ignorance
+        these are the perceived costs from :func:`poi.ignorance.perceive`, which
+        differ from the costs that actually determine commute times.
     alpha:
         Fraction of demand that is altruistic, in ``[0, 1]``.
     demand:
@@ -128,6 +131,11 @@ def solve_mixed(
         Weight of the tie-breaking ``||z||^2`` term (see module docstring).
     tol:
         Clarabel convergence tolerance.
+    true_net:
+        Network supplying the *true* cost functions used to score the outcome.
+        Defaults to ``net`` (drivers are not mistaken about anything).  Behaviour
+        -- who routes where, and the equilibrium conditions -- always follows
+        ``net``; only the reported commute times follow ``true_net``.
     """
     if not 0.0 - 1e-12 <= alpha <= 1.0 + 1e-12:
         raise ValueError("alpha must lie in [0, 1]")
@@ -157,7 +165,7 @@ def solve_mixed(
     fS = np.maximum(z[m:], 0.0)
     x = fA + fS
 
-    return _summarise(net, alpha, fA, fS, x, status, float(sol.solve_time))
+    return _summarise(net, true_net or net, alpha, fA, fS, x, status, float(sol.solve_time))
 
 
 def solve_single_class(
@@ -197,6 +205,41 @@ def solve_single_class(
 _TINY = 1e-300  # keeps zero-cost connector roads from being pruned as "no edge"
 
 
+def solve_uniform(
+    net: Network,
+    gamma: float,
+    demand: np.ndarray | None = None,
+    ridge: float = DEFAULT_RIDGE,
+    tol: float = 1e-12,
+) -> np.ndarray:
+    """Equilibrium of a *uniform* population with altruism level ``gamma``.
+
+    Every driver responds to ``c_e(x) + gamma * x c_e'(x) = a_e + (1 + gamma) b_e x``,
+    interpolating between purely selfish (``gamma = 0``) and marginal-cost
+    routing (``gamma = 1``).  This is the homogeneous cousin of
+    :func:`solve_mixed`, where instead a *fraction* of drivers is fully
+    altruistic; it is a single-class potential game, so it is a plain QP:
+
+        minimise  sum_e [ a_e x_e + (1 + gamma) b_e x_e^2 / 2 ]
+
+    Useful because it admits the closed-form substitution curve between altruism
+    and ignorance (see :mod:`poi.ignorance`).  Returns the flow vector.
+    """
+    if gamma < -1.0:
+        raise ValueError("gamma must exceed -1 for the objective to stay convex")
+    d = net.demand() if demand is None else np.asarray(demand, dtype=float)
+    m = net.n_edges
+    Aeq, beq = _equality_block(net, d)
+    P = sp.triu(
+        sp.diags((1.0 + gamma) * net.b).tocsc() + ridge * sp.eye(m, format="csc"), format="csc"
+    )
+    A = sp.vstack([Aeq, -sp.eye(m, format="csc")], format="csc")
+    b = np.concatenate([beq, np.zeros(m)])
+    cones = [clarabel.ZeroConeT(Aeq.shape[0]), clarabel.NonnegativeConeT(m)]
+    solver = clarabel.DefaultSolver(P, net.a.copy(), A, b, cones, _clarabel_settings(False, tol))
+    return np.maximum(np.asarray(solver.solve().x), 0.0)
+
+
 def _shortest_path_cost(net: Network, weights: np.ndarray) -> float:
     """Cheapest source-to-sink path under non-negative ``weights``.
 
@@ -220,24 +263,27 @@ def _shortest_path_cost(net: Network, weights: np.ndarray) -> float:
     return float(dist[net.sink])
 
 
-def _summarise(net, alpha, fA, fS, x, status, solve_time) -> Solution:
-    c = net.costs(x)
-    perceived_a = 0.5 * net.a + net.b * x  # altruist's rescaled marginal cost
+def _summarise(net, true_net, alpha, fA, fS, x, status, solve_time) -> Solution:
+    # What drivers respond to (may be a mistaken view of the network)...
+    c_perc = net.costs(x)
+    marg_perc = 0.5 * net.a + net.b * x  # altruist's rescaled perceived marginal
+    # ...versus what they actually experience.
+    c_true = true_net.costs(x)
 
-    mu_S = _shortest_path_cost(net, c)
-    mu_A = _shortest_path_cost(net, perceived_a)
+    mu_S = _shortest_path_cost(net, c_perc)
+    mu_A = _shortest_path_cost(net, marg_perc)
 
-    tot = net.total_cost(x)
-    cost_S = float(fS @ c) / (1.0 - alpha) if alpha < 1.0 - 1e-12 else float("nan")
-    cost_A = float(fA @ c) / alpha if alpha > 1e-12 else float("nan")
+    tot = true_net.total_cost(x)
+    cost_S = float(fS @ c_true) / (1.0 - alpha) if alpha < 1.0 - 1e-12 else float("nan")
+    cost_A = float(fA @ c_true) / alpha if alpha > 1e-12 else float("nan")
 
-    # Equilibrium check: every used path of a class must sit at that class's
-    # minimum perceived cost, so mean perceived cost == min perceived cost.
+    # Equilibrium check, in perceived terms: every used path of a class must sit
+    # at that class's minimum perceived cost, so mean perceived == min perceived.
     res_S = (
-        abs(float(fS @ c) / (1.0 - alpha) - mu_S) if alpha < 1.0 - 1e-12 else 0.0
+        abs(float(fS @ c_perc) / (1.0 - alpha) - mu_S) if alpha < 1.0 - 1e-12 else 0.0
     )
     res_A = (
-        abs(float(fA @ perceived_a) / alpha - mu_A) if alpha > 1e-12 else 0.0
+        abs(float(fA @ marg_perc) / alpha - mu_A) if alpha > 1e-12 else 0.0
     )
 
     return Solution(

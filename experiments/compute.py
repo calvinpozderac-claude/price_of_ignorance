@@ -27,7 +27,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from poi import PC_SQUARE, square_lattice, solve_mixed  # noqa: E402
-from poi.sweep import n_workers, run_grid, save  # noqa: E402
+from poi.sweep import n_workers, run_grid, run_grid3, save  # noqa: E402
 
 RESULTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "results")
 
@@ -136,6 +136,100 @@ ALL = {
     "backfire": backfire_survey,
     "traffic_maps": traffic_maps,
 }
+
+
+
+
+# ============================ user-ignorance extension =====================
+# arXiv:2503.09684 crossed with the altruism model.  Note the notation: omega is
+# the ignorance level (that paper's alpha); alpha stays the altruistic fraction.
+
+def ignorance_reproduction():
+    """Reproduce the ignorance paper: the PI(p, omega) surface at alpha = 0."""
+    _banner("Ignorance paper -- price of ignorance surface")
+    ps = np.linspace(0.02, 0.98, 33)
+    omegas = np.linspace(0.0, 1.0, 26)
+    g = run_grid3(ps, omegas, np.array([0.0]), L=20, n_seeds=32)
+    g["pc"] = PC_SQUARE
+    save(os.path.join(RESULTS, "ignorance_surface.npz"), g)
+
+
+def ignorance_sizes():
+    """PI(p) at omega = 2/3 for several L -- the ignorance paper's Fig. 4(a)."""
+    _banner("Ignorance paper -- PI(p) at omega = 2/3 versus system size")
+    ps = np.linspace(0.05, 0.95, 31)
+    out = {"p": ps, "pc": PC_SQUARE}
+    for L, n in [(10, 64), (20, 40), (30, 24), (40, 16)]:
+        print(f"L = {L}", flush=True)
+        g = run_grid3(ps, np.array([0.0, 2.0 / 3.0]), np.array([0.0]), L=L, n_seeds=n)
+        out[f"PI_L{L}"] = g["C"][:, 1, :, 0] / g["C"][:, 0, :, 0]
+    out["Ls"] = np.array([10, 20, 30, 40])
+    save(os.path.join(RESULTS, "ignorance_sizes.npz"), out)
+
+
+def joint_surface():
+    """The main new experiment: true cost across the (omega, alpha) plane."""
+    _banner("Joint (omega, alpha) surface at three p values")
+    ps = np.array([0.45, PC_SQUARE, 0.85])
+    omegas = np.linspace(0.0, 0.95, 20)
+    alphas = np.linspace(0.0, 1.0, 21)
+    g = run_grid3(ps, omegas, alphas, L=20, n_seeds=32)
+    g["pc"] = PC_SQUARE
+    save(os.path.join(RESULTS, "joint_surface.npz"), g)
+
+
+def altruism_sign_boundary():
+    """Where in (p, omega) does adding altruists start to *hurt*?"""
+    _banner("Sign boundary of dC/dalpha in the (p, omega) plane")
+    ps = np.linspace(0.05, 0.95, 25)
+    omegas = np.linspace(0.0, 0.9, 19)
+    alphas = np.array([0.0, 0.1, 0.25, 0.5, 0.75, 1.0])
+    g = run_grid3(ps, omegas, alphas, L=14, n_seeds=40)
+    g["pc"] = PC_SQUARE
+    save(os.path.join(RESULTS, "sign_boundary.npz"), g)
+
+
+def substitution_curve():
+    """Numerically locate the cost-minimising uniform altruism gamma*(omega).
+
+    The analytic prediction is gamma* = (2 - 3 omega) / (2 - omega): altruism and
+    ignorance are substitutes, and past omega = 2/3 the optimal gamma is negative.
+    """
+    _banner("Altruism-ignorance substitution curve")
+    from poi.ignorance import perceive
+    from poi.qp import solve_uniform
+    from poi import solve_single_class
+
+    ps = np.array([0.30, 0.45, PC_SQUARE, 0.85])
+    omegas = np.linspace(0.0, 0.9, 19)
+    gammas = np.linspace(-0.8, 1.4, 111)
+    n_seeds = 16
+    L = 20
+    C = np.zeros((ps.size, omegas.size, gammas.size))
+    Copt = np.zeros(ps.size)
+    for i, p in enumerate(ps):
+        for seed in range(n_seeds):
+            net = square_lattice(L, float(p), rng=seed)
+            Copt[i] += solve_single_class(net, "optimum")[1] / n_seeds
+            for j, w in enumerate(omegas):
+                q = perceive(net, float(w))
+                for k, gm in enumerate(gammas):
+                    C[i, j, k] += net.total_cost(solve_uniform(q, float(gm))) / n_seeds
+        print(f"  p = {p:.4f} done", flush=True)
+    save(
+        os.path.join(RESULTS, "substitution.npz"),
+        {"p": ps, "omega": omegas, "gamma": gammas, "C": C, "Copt": Copt,
+         "L": L, "n_seeds": n_seeds, "pc": PC_SQUARE},
+    )
+
+
+ALL.update({
+    "ignorance_surface": ignorance_reproduction,
+    "ignorance_sizes": ignorance_sizes,
+    "joint_surface": joint_surface,
+    "sign_boundary": altruism_sign_boundary,
+    "substitution": substitution_curve,
+})
 
 
 if __name__ == "__main__":
