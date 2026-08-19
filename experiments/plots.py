@@ -926,6 +926,137 @@ ALL.update({
 })
 
 
+# ============ real road networks and the equal-path-length assumption ========
+
+def fig_real_networks():
+    """Does any of this survive on an actual road network?"""
+    d = load(os.path.join(RESULTS, "real_networks.npz"))
+    names = [str(x) for x in d["names"]]
+    w, al, C = d["omega"], d["alpha"], d["C"]
+
+    fig, axes = plt.subplots(1, 3, figsize=(12.8, 3.9))
+
+    ax = axes[0]
+    for i, (n, c) in enumerate(zip(names, SERIES)):
+        pi = C[i, :, 0] / C[i, 0, 0]
+        ax.plot(w, pi, color=c, label=n.replace("-", " "))
+        direct_label(ax, 0.62, np.interp(0.62, w, pi), n.split("-")[0], c, dy=[8, 8, -9][i])
+    ax.axhline(1.0, color=MUTED, lw=0.9, ls=(0, (4, 3)))
+    ax.text(0.02, 1.005, "ignorance helps below this line", color=INK_2, fontsize=7.5, va="bottom")
+    ax.set_xlabel(r"ignorance $\omega$")
+    ax.set_ylabel(r"$C(\omega)\,/\,C(0)$, selfish drivers")
+    ax.set_title("(a)  On real roads, ignorance hurts", loc="left")
+    ax.legend(loc="upper left")
+
+    ax = axes[1]
+    for i, (n, c) in enumerate(zip(names, SERIES)):
+        eff = 100 * (C[i, :, -1] / C[i, :, 0] - 1)
+        ax.plot(w, eff, color=c)
+        lx = [0.55, 0.42, 0.30][i]
+        direct_label(ax, lx, np.interp(lx, w, eff), n.split("-")[0], c, dy=[-10, 10, 10][i])
+    ax.axhline(0.0, color=INK, lw=1.0)
+    ax.set_xlabel(r"ignorance $\omega$")
+    ax.set_ylabel(r"% change in $C$, $\alpha: 0 \to 1$")
+    ax.set_title("(b)  ...and altruism keeps helping", loc="left")
+    ax.text(0.03, 0.06, "below zero = altruism helps", transform=ax.transAxes,
+            fontsize=7.5, color=INK_2, va="bottom")
+
+    ax = axes[2]
+    i = 0
+    rel = 100 * (C[i] / C[i].min() - 1)
+    im = ax.imshow(rel.T, origin="lower", aspect="auto",
+                   extent=[w[0], w[-1], al[0], al[-1]], cmap=SEQ_ORANGE,
+                   vmin=0, vmax=float(np.nanpercentile(rel, 92)))
+    fig.colorbar(im, ax=ax, label="% slower than the best mix", extend="max")
+    ridge = al[np.argmin(rel, axis=1)]
+    ax.plot(w, ridge, color=INK, lw=1.2, marker="o", ms=2.6,
+            markerfacecolor=SURFACE, markeredgewidth=0.7)
+    ax.set_xlabel(r"ignorance $\omega$")
+    ax.set_ylabel(r"altruistic fraction $\alpha$")
+    ax.set_title("(c)  " + names[i] + r": best $\alpha$ stays at 1", loc="left")
+    ax.grid(False)
+
+    fig.suptitle(
+        "The lattice's reversal does not survive on real road networks",
+        x=0.008, y=0.99, ha="left", fontsize=12, fontweight="bold", color=INK,
+    )
+    fig.text(
+        0.008, 0.93,
+        "TNTP benchmark networks with BPR costs and real OD matrices, solved by Frank-Wolfe. Ignorance is "
+        "harmful here rather than helpful, so altruists repair damage instead of over-correcting.",
+        ha="left", fontsize=8.5, color=INK_2,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.90))
+    _save(fig, "fig13_real_networks.png")
+
+
+def fig_irregular():
+    """The single assumption that decides the answer: equal path lengths."""
+    d = load(os.path.join(RESULTS, "irregular.npz"))
+    p, w, al, C = d["p"], d["omega"], d["alpha"], d["C"]
+    lat = load(os.path.join(RESULTS, "ignorance_surface.npz"))
+
+    fig, axes = plt.subplots(1, 3, figsize=(12.8, 3.9))
+
+    ax = axes[0]
+    lp, lw_ = lat["p"], lat["omega"]
+    LC = lat["C"][:, :, :, 0]
+    LPI = nanmean(LC / LC[:, [0], :], axis=2)
+    jl = int(np.argmin(abs(lw_ - 2 / 3)))
+    ax.plot(lp, LPI[:, jl], color=BLUE, label="lattice (equal path lengths)")
+    jd = int(np.argmin(abs(w - 2 / 3)))
+    ax.plot(p, C[:, jd, 0] / C[:, 0, 0], color=ORANGE, label="skip-DAG (unequal)")
+    ax.axhline(1.0, color=MUTED, lw=0.9, ls=(0, (4, 3)))
+    ax.set_xlabel("fraction of congestible roads, $p$")
+    ax.set_ylabel(r"$P_I$ at $\omega = 2/3$")
+    ax.set_title("(a)  Universal benefit is lattice-only", loc="left")
+    ax.legend(loc="upper left")
+
+    ax = axes[1]
+    rel = 100 * (C[:, :, -1] / C[:, :, 0] - 1)
+    v = float(np.nanpercentile(np.abs(rel), 97))
+    im = ax.imshow(rel.T, origin="lower", aspect="auto",
+                   extent=[p[0], p[-1], w[0], w[-1]], cmap=DIVERGING, vmin=-v, vmax=v)
+    ax.contour(p, w, rel.T, levels=[0.0], colors=[INK], linewidths=1.5)
+    fig.colorbar(im, ax=ax, label=r"% change in $C$, $\alpha: 0 \to 1$", extend="both")
+    ax.text(0.19, 0.10, "altruism\nhelps", color=INK, fontsize=8.5, fontweight="bold")
+    ax.text(0.28, 0.72, "hurts", color="white", fontsize=8.5, fontweight="bold")
+    ax.text(0.63, 0.42, "helps\nagain", color="white", fontsize=8, fontweight="bold")
+    ax.set_xlabel("fraction of congestible roads, $p$")
+    ax.set_ylabel(r"ignorance $\omega$")
+    ax.set_title("(b)  A third regime appears", loc="left")
+    ax.grid(False)
+
+    ax = axes[2]
+    for pp, c in zip([0.3, 0.6, 0.9], SERIES):
+        k = int(np.argmin(abs(p - pp)))
+        pi = C[k, :, 0] / C[k, 0, 0]
+        eff = 100 * (C[k, :, -1] / C[k, :, 0] - 1)
+        ax.plot(pi, eff, color=c, marker="o", ms=3)
+        direct_label(ax, pi[-1], eff[-1], f"$p={p[k]:.2f}$", c, dy=-9)
+    ax.axhline(0.0, color=INK, lw=1.0)
+    ax.axvline(1.0, color=MUTED, lw=0.9, ls=(0, (4, 3)))
+    ax.set_xlabel(r"price of ignorance $P_I$   ($>1$: ignorance hurts)")
+    ax.set_ylabel(r"% change in $C$, $\alpha: 0 \to 1$")
+    ax.set_title("(c)  Backfire only where ignorance helps", loc="left")
+
+    fig.suptitle(
+        "Equal path lengths is the assumption that decides the answer",
+        x=0.008, y=0.99, ha="left", fontsize=12, fontweight="bold", color=INK,
+    )
+    fig.text(
+        0.008, 0.93,
+        "Same model, same cost pair, same unit demand -- only the path-length structure differs. Altruism "
+        "over-corrects exactly where ignorance is already correcting, and repairs damage where it is not.",
+        ha="left", fontsize=8.5, color=INK_2,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.90))
+    _save(fig, "fig14_irregular.png")
+
+
+ALL.update({"real": fig_real_networks, "irregular": fig_irregular})
+
+
 if __name__ == "__main__":
     os.makedirs(FIGURES, exist_ok=True)
     use_style()

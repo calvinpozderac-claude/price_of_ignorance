@@ -26,7 +26,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from poi import PC_SQUARE, square_lattice, solve_mixed  # noqa: E402
+from poi import PC_SQUARE, solve_single_class, square_lattice, solve_mixed  # noqa: E402
 from poi.sweep import n_workers, run_grid, run_grid3, save  # noqa: E402
 
 RESULTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "results")
@@ -303,6 +303,94 @@ def instrument_comparison():
 
 
 ALL["instruments"] = instrument_comparison
+
+
+# ===================== real road networks + robustness =====================
+
+TNTP_BASE = "/workspace/bstabler/transportationnetworks"
+REAL_NETS = ("SiouxFalls", "Eastern-Massachusetts", "Anaheim")
+
+
+def _real_job(args):
+    """One (network, omega, alpha) point on a real road network."""
+    from poi.bpr import frank_wolfe_mixed, perceive_bpr, read_tntp
+
+    name, omega, alpha, tol, max_iter = args
+    net = read_tntp(os.path.join(TNTP_BASE, name))
+    percv = net if omega == 0.0 else perceive_bpr(net, omega)
+    r = frank_wolfe_mixed(percv, alpha, true_net=net, tol=tol, max_iter=max_iter)
+    return name, omega, alpha, r.total_cost, r.cost_altruist, r.cost_selfish, r.rel_gap
+
+
+def real_networks():
+    """The (omega, alpha) surface on real road networks from the TNTP benchmark."""
+    _banner("Real road networks -- (omega, alpha) surfaces")
+    from concurrent.futures import ProcessPoolExecutor
+
+    if not os.path.isdir(TNTP_BASE):
+        print(f"  benchmark data not found at {TNTP_BASE}; skipping", flush=True)
+        return
+    omegas = np.linspace(0.0, 0.9, 10)
+    alphas = np.linspace(0.0, 1.0, 11)
+    jobs = [(n, float(w), float(a), 1e-6, 900)
+            for n in REAL_NETS for w in omegas for a in alphas]
+    idx = {n: i for i, n in enumerate(REAL_NETS)}
+    shape = (len(REAL_NETS), omegas.size, alphas.size)
+    C = np.full(shape, np.nan)
+    CA = np.full(shape, np.nan)
+    CS = np.full(shape, np.nan)
+    gap = np.full(shape, np.nan)
+    done = 0
+    t0 = time.time()
+    with ProcessPoolExecutor(max_workers=n_workers()) as ex:
+        for name, w, a, c, ca, cs, g in ex.map(_real_job, jobs, chunksize=1):
+            i = idx[name]
+            j = int(np.argmin(abs(omegas - w)))
+            k = int(np.argmin(abs(alphas - a)))
+            C[i, j, k], CA[i, j, k], CS[i, j, k], gap[i, j, k] = c, ca, cs, g
+            done += 1
+            if done % 20 == 0 or done == len(jobs):
+                el = time.time() - t0
+                print(f"  [{done}/{len(jobs)}] {el:6.0f}s eta {el/done*(len(jobs)-done):6.0f}s",
+                      flush=True)
+    save(
+        os.path.join(RESULTS, "real_networks.npz"),
+        {"names": np.array(REAL_NETS), "omega": omegas, "alpha": alphas,
+         "C": C, "CA": CA, "CS": CS, "rel_gap": gap},
+    )
+
+
+def irregular_robustness():
+    """Repeat the lattice study on a network with unequal path lengths."""
+    _banner("Robustness -- unequal path lengths (skip-DAG)")
+    from poi.ignorance import solve_ignorant
+    from poi.irregular import path_length_spread, skip_dag
+
+    ps = np.linspace(0.15, 0.9, 16)
+    omegas = np.linspace(0.0, 0.9, 10)
+    alphas = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
+    n_seeds, K, W = 16, 24, 12
+    C = np.zeros((ps.size, omegas.size, alphas.size))
+    Copt = np.zeros(ps.size)
+    spread = np.zeros((ps.size, 2))
+    for i, p in enumerate(ps):
+        for s in range(n_seeds):
+            net = skip_dag(K, W, float(p), rng=s, skip_frac=0.5)
+            if s == 0:
+                spread[i] = path_length_spread(net)
+            Copt[i] += solve_single_class(net, "optimum")[1] / n_seeds
+            for j, w in enumerate(omegas):
+                for k, a in enumerate(alphas):
+                    C[i, j, k] += solve_ignorant(net, float(w), float(a)).total_cost / n_seeds
+        print(f"  p = {p:.3f} done", flush=True)
+    save(
+        os.path.join(RESULTS, "irregular.npz"),
+        {"p": ps, "omega": omegas, "alpha": alphas, "C": C, "Copt": Copt,
+         "path_len": spread, "n_seeds": n_seeds, "K": K, "W": W, "pc": PC_SQUARE},
+    )
+
+
+ALL.update({"real_networks": real_networks, "irregular": irregular_robustness})
 
 
 if __name__ == "__main__":

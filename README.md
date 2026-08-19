@@ -44,19 +44,30 @@ being small and takes over:
   paper's threshold from the altruism side — and goes *negative* beyond it,
   where the corrective role would have to be played by spite.
 
+**But on real road networks the reversal does not happen.** Part III takes the
+same questions to the Transportation Networks benchmark (Sioux Falls, Eastern
+Massachusetts, Anaheim) with BPR costs and real OD matrices. There, ignorance is
+*harmful* rather than helpful, and altruism helps **more** as drivers get worse
+informed, not less. The lattice's over-correction is real but lives in a corner
+of parameter space that real networks are not in — the deciding assumption is
+that every lattice path crosses exactly `2L` roads.
+
 ## Contents
 
 ```
 poi/lattice.py    the papers' directed lattice, plus Pigou and a 3D BCC variant
 poi/qp.py         the mixed-equilibrium convex QP (Clarabel) + a degeneracy certificate
 poi/ignorance.py  perceived-cost mixing, and the ignorance/altruism composition
+poi/irregular.py  networks with unequal path lengths, to test that assumption
+poi/bpr.py        real road networks: TNTP data, BPR costs, Frank-Wolfe solver
 poi/pigou.py      exact closed-form two-road solution, with and without ignorance
 poi/metrics.py    efficiency, saturation, exploitation gap, backfire
 poi/sweep.py      parallel disorder-averaged sweeps over (p, omega, alpha)
 experiments/      compute.py builds results/*.npz; plots.py renders figures/*.png
                   summary.py prints every headline number
-tests/            319 tests: both papers' sanity checks, closed forms vs solver,
-                  equilibrium conditions, and the analytic substitution law
+tests/            354 tests: both papers' sanity checks, closed forms vs solver,
+                  equilibrium conditions, the analytic substitution law, the
+                  published Sioux Falls equilibrium, and the robustness claims
 ```
 
 **Notation.** The two source papers both use `α`. Here `α` is always the
@@ -377,6 +388,100 @@ cost-minimising `ω` any perturbation must raise `C`, so the flip is *guaranteed
 by then — but it can happen earlier, because the altruists' correction is not
 aligned with whatever error remains.
 
+## Part III: real road networks
+
+The lattice results above rest on assumptions worth testing directly. This part
+does that, in two steps: first breaking the single most load-bearing assumption
+in an otherwise identical model, then re-running the whole question on actual
+road networks.
+
+### 11. The assumption that decides the answer
+
+![Irregular](figures/fig14_irregular.png)
+
+Every path through the paper's lattice crosses exactly `2L` roads. That is not
+cosmetic — it makes `Σ_e x_e` the same for *every* feasible flow, which is the
+"free direction" the `γ*` derivation uses, and it means ignorance can never send
+a driver down a genuinely longer route.
+
+`poi.irregular.skip_dag` keeps everything else identical — same two road types,
+same `c = 1` / `c = x` pair, same unit demand — and adds links that jump two
+layers, so path lengths run 15–24 roads instead of exactly 24. Results:
+
+| | lattice | unequal path lengths |
+|---|---|---|
+| `P_I ≤ 1` at `ω = 2/3` | for **100%** of `p` | for **0%** of `p` (1.06 → 2.39) |
+| altruism flips sign at | `ω ≈ 0.45–0.50` | `ω ≈ 0.45` |
+| altruism hurts over | 57% of the grid | 38% of the grid |
+
+So the *altruism reversal survives* — the flip point barely moves — while the
+ignorance paper's headline result, that ignorance below `ω = 2/3` helps at every
+`p`, **does not**. It is specific to equal-length paths. (This is not a criticism
+of that paper, whose model is explicitly the equal-length lattice; it is the
+first thing to check before carrying the result outside.)
+
+A third regime also appears, absent from the lattice: at high `p`, where
+ignorance does real damage, altruists **repair** it rather than over-correcting —
+up to −17% at `p = 0.90, ω = 0.5`. Panel (c) makes the rule plain: altruism
+backfires only where `P_I ≲ 1`, i.e. only where ignorance is already doing the
+corrective work.
+
+### 12. Actual road networks
+
+![Real networks](figures/fig13_real_networks.png)
+
+`poi.bpr` reads the [Transportation Networks](https://github.com/bstabler/TransportationNetworks)
+benchmark format and solves the mixed equilibrium by Frank-Wolfe.
+
+**The potential generalises.** The `λ` rescaling is not affine-specific. Symmetry
+of the VI Jacobian needs `λ(2c' + x c'') = c'`, and for any power law
+`x c'' = (β−1)c'`, so `λ = 1/(β+1)` — a constant, `1/2` for affine and `1/5` for
+BPR. The offset between the classes is then also constant, so
+
+```
+Φ(f^A, f^S) = Σ_e ∫₀^{x_e} c_e(s) ds  −  Σ_e [t⁰_e · β/(β+1)] · f^A_e
+```
+
+Beckmann's integral plus a per-link discount only altruists receive, proportional
+to free-flow time. Altruists behave exactly as if distance mattered less and
+congestion more. Convex, so Frank-Wolfe applies.
+
+Validation: Sioux Falls user equilibrium comes out at **7,479,953** against the
+published ~7,480,225, price of anarchy 1.0396 (published ~1.04), flow
+conservation to 1e-10.
+
+**Costs and ignorance on a real network.** Costs are the BPR functions shipped
+with the data, `c(x) = t⁰(1 + 0.15 (x/cap)⁴)`; nothing is invented. There are no
+road *types* to blend between, so ignorance instead shrinks each link's capacity
+toward the network geometric mean in log space, collapsing Sioux Falls' 5.4×
+capacity spread to 2.3× at `ω = 0.5` and to 1.0× at `ω = 1`. Free-flow time is
+left alone by default — drivers know roughly how far things are, but misjudge how
+easily a road clogs.
+
+**The result reverses the lattice's conclusion:**
+
+| | Sioux Falls | E. Mass. | Anaheim |
+|---|---|---|---|
+| price of anarchy | 1.0396 | 1.0314 | 1.0178 |
+| `P_I` at `ω = 2/3` (lattice: ~0.95) | **1.351** | **1.101** | 0.994 |
+| altruism effect at `ω = 0` | −3.8% | −3.0% | −1.8% |
+| altruism effect at `ω = 2/3` (lattice: **+5%**) | **−7.1%** | **−5.0%** | −0.7% |
+| altruism flips sign | never | never | `ω = 0.9` |
+
+Ignorance costs up to **65%** extra travel time on Sioux Falls. Altruism helps
+everywhere, and helps roughly **twice as much** when drivers are ill-informed.
+The best mix on all three networks is `ω = 0, α = 1` — informed altruists.
+
+The two findings are consistent: altruism over-corrects only when ignorance is
+already correcting. Real networks, with their unequal path lengths, sit in the
+regime where ignorance damages rather than corrects, so altruism repairs.
+
+**Policy reading, revised.** The lattice suggested navigation apps and congestion
+pricing were substitutes that could over-correct together. On real networks the
+opposite holds: better information and marginal-cost routing are *complements*,
+and the case for altruistic routing is strongest exactly where drivers are worst
+informed.
+
 ## Caveats
 
 * Costs are affine (`c = 1` or `c = x`), matching the paper. Roughgarden–Tardos
@@ -389,7 +494,16 @@ aligned with whatever error remains.
 * Ignorance is modelled as a *bias*, not as noise: every driver blends the two
   cost functions the same way, rather than each drawing an independent wrong
   guess. That is the ignorance paper's own construction, and it is what keeps
-  perceived costs affine and the problem a QP.
+  perceived costs affine and the problem a QP. This is the largest remaining
+  conceptual gap, and it is untested here: independent errors would act like
+  mixed strategies and generically help, whereas correlated bias (which is what
+  a navigation app produces) can be far more damaging.
+* The real-network ignorance model is *analogous* to the lattice one, not
+  identical: `ω` is not on the same scale in the two settings, so only the
+  qualitative endpoints are comparable.
+* Frank-Wolfe converges sublinearly. Reported relative gaps are median 3.5e-6,
+  max 1.2e-3 (7 of 330 cells, all in Eastern Massachusetts); differences below
+  ~0.2% on that network should be treated as unresolved.
 * `γ*(ω)` is derived by dropping the `Σ_slow x²` term. That term is subleading
   in `L` (the ignorance paper's argument), which is why the law is accurate to
   ~0.02 rather than exact, with the largest deviation at small `p` where the most

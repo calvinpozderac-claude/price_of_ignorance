@@ -208,6 +208,55 @@ def substitution():
     print(f"  gamma* < 0 (spite needed) once omega > 2/3: {gamma_star(0.8):+.3f} at omega=0.8")
 
 
+def real_networks():
+    head("Real road networks (TNTP benchmark, BPR costs, Frank-Wolfe)")
+    d = load(os.path.join(RESULTS, "real_networks.npz"))
+    names = [str(x) for x in d["names"]]
+    w, al, C, g = d["omega"], d["alpha"], d["C"], d["rel_gap"]
+    print(f"  Frank-Wolfe relative gap: median {np.nanmedian(g):.1e}, max {np.nanmax(g):.1e}")
+    for i, n in enumerate(names):
+        pi = C[i, :, 0] / C[i, 0, 0]
+        eff = 100 * (C[i, :, -1] / C[i, :, 0] - 1)
+        flip = np.flatnonzero(eff > 0)
+        print(f"\n  {n}")
+        print(f"    price of anarchy                 = {C[i,0,0]/C[i,0,-1]:.4f}")
+        print(f"    price of ignorance at omega=2/3  = {np.interp(2/3, w, pi):.4f}"
+              f"   (lattice: ~0.95)")
+        print(f"    worst price of ignorance         = {pi.max():.4f} at omega = {w[pi.argmax()]:.1f}")
+        print(f"    altruism effect at omega=0       = {eff[0]:+.2f}%")
+        print(f"    altruism effect at omega=2/3     = {np.interp(2/3, w, eff):+.2f}%"
+              f"   (lattice: about +5%)")
+        print(f"    altruism flips sign at omega     = "
+              f"{w[flip[0]]:.1f}" if flip.size else "    altruism never hurts")
+        jb, kb = np.unravel_index(np.nanargmin(C[i]), C[i].shape)
+        print(f"    cheapest mix: omega={w[jb]:.1f}, alpha={al[kb]:.1f}")
+
+
+def irregular():
+    head("Robustness: unequal path lengths (skip-DAG)")
+    d = load(os.path.join(RESULTS, "irregular.npz"))
+    p, w, C = d["p"], d["omega"], d["C"]
+    lo, hi = d["path_len"][0].astype(int)
+    print(f"  path lengths range {lo}-{hi} roads (lattice: exactly {2*int(d['K'])//2})")
+    j = int(np.argmin(abs(w - 2 / 3)))
+    pi = C[:, j, 0] / C[:, 0, 0]
+    print(f"  price of ignorance at omega=2/3: {pi.min():.3f} to {pi.max():.3f}")
+    print(f"    helps (PI<1) for {100*np.mean(pi < 1):.0f}% of p values"
+          f"  -- on the lattice it helps for 100%")
+    rel = C[:, :, -1] / C[:, :, 0] - 1
+    print(f"  altruism hurts over {100*np.mean(rel > 0):.0f}% of the (p, omega) grid"
+          f"  (lattice: 57%)")
+    flip = []
+    for i in range(p.size):
+        f = np.flatnonzero(rel[i] > 0)
+        flip.append(w[f[0]] if f.size else np.nan)
+    print(f"  mean omega where altruism flips = {np.nanmean(flip):.2f}  (lattice: ~0.45-0.50)")
+    best = np.unravel_index(np.argmin(rel), rel.shape)
+    print(f"  altruism helps MOST at p={p[best[0]]:.2f}, omega={w[best[1]]:.1f}: {100*rel[best]:+.1f}%")
+    print("    -- a regime absent from the lattice: where ignorance does damage,")
+    print("       altruists repair it instead of over-correcting.")
+
+
 if __name__ == "__main__":
     warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN slices at alpha 0 and 1
     for name, fn in [
@@ -219,6 +268,8 @@ if __name__ == "__main__":
         ("joint_surface", joint),
         ("sign_boundary", sign_boundary),
         ("substitution", substitution),
+        ("irregular", irregular),
+        ("real_networks", real_networks),
     ]:
         if name is None or os.path.exists(os.path.join(RESULTS, name + ".npz")):
             fn()
