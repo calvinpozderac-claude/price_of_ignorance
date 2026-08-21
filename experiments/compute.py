@@ -393,6 +393,184 @@ def irregular_robustness():
 ALL.update({"real_networks": real_networks, "irregular": irregular_robustness})
 
 
+# ================= idiosyncratic uncertainty: (sigma, rho) ==================
+
+def _stoch_job(args):
+    """One lattice realisation over the (sigma, rho) grid, at several alphas."""
+    from poi.stochastic import solve_stochastic
+
+    L, p, seed, sigmas, rhos, alphas, K = args
+    net = square_lattice(L, float(p), rng=seed)
+    C = np.empty((sigmas.size, rhos.size, alphas.size))
+    for i, sg in enumerate(sigmas):
+        for j, rh in enumerate(rhos):
+            for k, al in enumerate(alphas):
+                C[i, j, k] = solve_stochastic(
+                    net, float(sg), float(rh), K, alpha=float(al), rng=10_000 + seed
+                ).total_cost
+    return seed, C, solve_single_class(net, "optimum")[1]
+
+
+def stochastic_lattice():
+    """The (sigma, rho) plane on the lattice, crossed with the altruistic fraction."""
+    _banner("Idiosyncratic uncertainty -- (sigma, rho) on the lattice")
+    from concurrent.futures import ProcessPoolExecutor
+
+    L, K, n_seeds, p = 8, 48, 24, PC_SQUARE
+    sigmas = np.array([0.0, 0.02, 0.05, 0.1, 0.15, 0.22, 0.3, 0.45, 0.7, 1.0])
+    rhos = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
+    alphas = np.array([0.0, 0.5, 1.0])
+    C = np.zeros((sigmas.size, rhos.size, alphas.size))
+    Copt = 0.0
+    jobs = [(L, p, s, sigmas, rhos, alphas, K) for s in range(n_seeds)]
+    done = 0
+    t0 = time.time()
+    with ProcessPoolExecutor(max_workers=n_workers()) as ex:
+        for seed, c, copt in ex.map(_stoch_job, jobs, chunksize=1):
+            C += c / n_seeds
+            Copt += copt / n_seeds
+            done += 1
+            el = time.time() - t0
+            print(f"  [{done}/{len(jobs)}] {el:6.0f}s eta {el/done*(len(jobs)-done):6.0f}s",
+                  flush=True)
+    save(os.path.join(RESULTS, "stochastic_lattice.npz"),
+         {"sigma": sigmas, "rho": rhos, "alpha": alphas, "C": C, "Copt": Copt,
+          "L": L, "K": K, "n_seeds": n_seeds, "p": p})
+
+
+def _kconv_job(args):
+    from poi.stochastic import solve_stochastic
+
+    L, p, seed, Ks, sigma, rho = args
+    net = square_lattice(L, float(p), rng=seed)
+    base = solve_stochastic(net, 0.0, 0.0, 1).total_cost
+    return np.array([solve_stochastic(net, sigma, rho, int(K), rng=500 + seed).total_cost
+                     for K in Ks]) / base
+
+
+def stochastic_convergence():
+    """How many driver types before the population reads as genuinely idiosyncratic?"""
+    _banner("Type-count convergence")
+    from concurrent.futures import ProcessPoolExecutor
+
+    Ks = np.array([1, 2, 4, 8, 16, 32, 64, 128, 256])
+    L, p, n_seeds = 8, PC_SQUARE, 16
+    out = {}
+    for rho, tag in [(0.0, "rho0"), (0.5, "rho05")]:
+        acc = np.zeros(Ks.size)
+        jobs = [(L, p, s, Ks, 0.10, rho) for s in range(n_seeds)]
+        with ProcessPoolExecutor(max_workers=n_workers()) as ex:
+            for r in ex.map(_kconv_job, jobs, chunksize=1):
+                acc += r / n_seeds
+        out[tag] = acc
+        print(f"  rho={rho}: " + " ".join(f"{v:.4f}" for v in acc), flush=True)
+    # The exact rho = 0 continuum, from Dial's algorithm (Gumbel path errors).
+    from poi.stochastic import dial_logit
+    thetas = np.array([300.0, 100.0, 30.0, 15.0, 10.0, 6.0, 3.0, 1.5, 0.7])
+    dial = np.zeros(thetas.size)
+    for s in range(n_seeds):
+        net = square_lattice(L, p, rng=s)
+        eq = solve_single_class(net, "equilibrium")[1]
+        for i, th in enumerate(thetas):
+            dial[i] += dial_logit(net, float(th), max_iter=2000, tol=1e-12)[1] / eq / n_seeds
+    save(os.path.join(RESULTS, "stochastic_convergence.npz"),
+         {"K": Ks, "theta": thetas, "dial": dial, "L": L, "p": p,
+          "n_seeds": n_seeds, "sigma": 0.10, **out})
+
+
+def _irr_stoch_job(args):
+    from poi.irregular import skip_dag
+    from poi.stochastic import solve_stochastic
+
+    K_types, p, seed, sigmas, rhos = args
+    net = skip_dag(24, 10, float(p), rng=seed, skip_frac=0.5)
+    base = solve_stochastic(net, 0.0, 0.0, 1).total_cost
+    C = np.empty((sigmas.size, rhos.size))
+    for i, sg in enumerate(sigmas):
+        for j, rh in enumerate(rhos):
+            C[i, j] = solve_stochastic(net, float(sg), float(rh), K_types,
+                                       rng=2000 + seed).total_cost
+    return C / base
+
+
+def stochastic_irregular():
+    """Re-run the unequal-path-length case with enough types to be trustworthy."""
+    _banner("Idiosyncratic uncertainty on unequal path lengths")
+    from concurrent.futures import ProcessPoolExecutor
+
+    sigmas = np.array([0.0, 0.05, 0.1, 0.2, 0.35, 0.6, 1.0])
+    rhos = np.array([0.0, 1.0])
+    ps = np.array([0.3, 0.6, 0.9])
+    n_seeds, K = 16, 48
+    C = np.zeros((ps.size, sigmas.size, rhos.size))
+    for ip, p in enumerate(ps):
+        jobs = [(K, float(p), s, sigmas, rhos) for s in range(n_seeds)]
+        with ProcessPoolExecutor(max_workers=n_workers()) as ex:
+            for r in ex.map(_irr_stoch_job, jobs, chunksize=1):
+                C[ip] += r / n_seeds
+        print(f"  p = {p} done", flush=True)
+    save(os.path.join(RESULTS, "stochastic_irregular.npz"),
+         {"p": ps, "sigma": sigmas, "rho": rhos, "C": C, "K": K, "n_seeds": n_seeds})
+
+
+def _real_stoch_job(args):
+    from poi.bpr import frank_wolfe_mixed, read_tntp
+    from poi.stochastic import solve_stochastic_bpr
+
+    name, sigma, rho, alpha, K = args
+    net = read_tntp(os.path.join(TNTP_BASE, name))
+    if sigma == 0.0:
+        r = frank_wolfe_mixed(net, alpha, tol=1e-6, max_iter=800)
+    else:
+        r = solve_stochastic_bpr(net, sigma, rho, K, alpha, rng=77,
+                                 tol=1e-6, max_iter=800)
+    return name, sigma, rho, alpha, r.total_cost, r.rel_gap
+
+
+def stochastic_real():
+    """Does independent error help on a real road network, where bias did not?"""
+    _banner("Idiosyncratic uncertainty on real road networks")
+    from concurrent.futures import ProcessPoolExecutor
+
+    if not os.path.isdir(TNTP_BASE):
+        print("  benchmark data not found; skipping", flush=True)
+        return
+    names = ("SiouxFalls", "Eastern-Massachusetts")
+    sigmas = np.array([0.0, 0.05, 0.1, 0.2, 0.35, 0.6, 1.0])
+    rhos = np.array([0.0, 1.0])
+    alphas = np.array([0.0, 1.0])
+    K = 12
+    jobs = [(n, float(sg), float(rh), float(al), K)
+            for n in names for sg in sigmas for rh in rhos for al in alphas]
+    idx = {n: i for i, n in enumerate(names)}
+    C = np.full((len(names), sigmas.size, rhos.size, alphas.size), np.nan)
+    G = np.full_like(C, np.nan)
+    done = 0
+    t0 = time.time()
+    with ProcessPoolExecutor(max_workers=n_workers()) as ex:
+        for name, sg, rh, al, c, g in ex.map(_real_stoch_job, jobs, chunksize=1):
+            i = idx[name]
+            j = int(np.argmin(abs(sigmas - sg)))
+            k = int(np.argmin(abs(rhos - rh)))
+            m = int(np.argmin(abs(alphas - al)))
+            C[i, j, k, m], G[i, j, k, m] = c, g
+            done += 1
+            el = time.time() - t0
+            print(f"  [{done}/{len(jobs)}] {el:6.0f}s eta {el/done*(len(jobs)-done):6.0f}s",
+                  flush=True)
+    save(os.path.join(RESULTS, "stochastic_real.npz"),
+         {"names": np.array(names), "sigma": sigmas, "rho": rhos, "alpha": alphas,
+          "C": C, "rel_gap": G, "K": K})
+
+
+ALL.update({
+    "stochastic_lattice": stochastic_lattice,
+    "stochastic_convergence": stochastic_convergence,
+    "stochastic_irregular": stochastic_irregular,
+    "stochastic_real": stochastic_real,
+})
+
+
 if __name__ == "__main__":
     os.makedirs(RESULTS, exist_ok=True)
     which = sys.argv[1:] or list(ALL)

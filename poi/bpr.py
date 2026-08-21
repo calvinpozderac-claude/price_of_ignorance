@@ -373,6 +373,112 @@ class _Loader:
         return y
 
 
+def frank_wolfe_multiclass(
+    net: BPRNetwork,
+    classes,
+    true_net: BPRNetwork | None = None,
+    alpha: float = 0.0,
+    max_iter: int = 400,
+    tol: float = 1e-5,
+    verbose: bool = False,
+) -> FWResult:
+    """Frank-Wolfe for any number of driver classes with additive cost offsets.
+
+    ``classes`` is a list of ``(share, delta, is_altruist)``: class ``i`` carries
+    ``share`` of every OD demand and routes on the perceived link cost
+    ``c_e(x_e) + delta_e``, with ``delta`` constant in the flow.  Because every
+    class's Jacobian row is then ``c'(x)``, a potential exists:
+
+        Phi = sum_e integral_0^{x_e} c_e  +  sum_i sum_e delta^i_e f^i_e
+
+    The two-class altruist/selfish problem is the special case
+    ``[(alpha, -disc, True), (1 - alpha, 0, False)]``; :mod:`poi.stochastic` adds
+    per-driver perception errors as further classes.
+
+    Perceived costs are floored at a small positive value before each shortest
+    path search: Dijkstra requires non-negative weights, and a driver who
+    believed a road had negative travel time would not be modelling anything
+    real.
+    """
+    truth = true_net or net
+    classes = [(float(s), np.asarray(d, dtype=float), bool(a))
+               for s, d, a in classes if s > 1e-15]
+    if not classes:
+        raise ValueError("no class carries any demand")
+    loader = _Loader(net)
+    n_cls = len(classes)
+    floor = 1e-6 * float(np.min(net.t0[net.t0 > 0]))
+
+    def phi(f):
+        return net.beckmann(f.sum(0)) + sum(
+            float(d @ f[i]) for i, (_, d, _) in enumerate(classes)
+        )
+
+    # Start from a free-flow all-or-nothing loading for each class.
+    c0 = net.costs(np.zeros(net.n_edges))
+    f = np.stack([loader.assign(np.maximum(c0 + d, floor), s) for s, d, _ in classes])
+
+    rel_gap, it, converged = np.inf, 0, False
+    yc = None  # conjugate target point (feasible), not a direction
+    for it in range(1, max_iter + 1):
+        x = f.sum(0)
+        c = net.costs(x)
+        g = np.stack([c + d for _, d, _ in classes])
+        y = np.stack([loader.assign(np.maximum(g[i], floor), classes[i][0])
+                      for i in range(n_cls)])
+
+        gap = -float(np.sum(g * (y - f)))
+        denom = max(float(c @ x), 1e-12)
+        rel_gap = gap / denom
+        if verbose and (it % 25 == 0 or it == 1):
+            print(f"  it {it:4d}  rel_gap {rel_gap:.3e}", flush=True)
+        if rel_gap < tol:
+            converged = True
+            break
+
+        # Conjugate Frank-Wolfe (Mitradjieva & Lindberg).  Blending the target
+        # *points* keeps every iterate a convex combination of feasible points,
+        # so flow conservation is preserved exactly; blending directions instead
+        # can push flows negative and silently destroy conservation.
+        if yc is None:
+            yc = y
+        else:
+            hess = _dcost(net, x)
+            pdx = (yc - f).sum(0)
+            ndx = (y - f).sum(0)
+            D = float(hess @ (pdx * (ndx - pdx)))
+            th = 0.0
+            if abs(D) > 1e-30:
+                th = min(max(float(hess @ (pdx * ndx)) / D, 0.0), 0.9999)
+            yc = th * yc + (1.0 - th) * y
+        d = yc - f
+
+        # Exact line search: phi'(s) is increasing in s, so bisect on it.
+        dx = d.sum(0)
+        const = sum(float(classes[i][1] @ d[i]) for i in range(n_cls))
+
+        def dphi(step):
+            return float(net.costs(x + step * dx) @ dx) + const
+
+        if dphi(1.0) <= 0.0:
+            step = 1.0
+        else:
+            lo, hi = 0.0, 1.0
+            for _ in range(60):
+                mid = 0.5 * (lo + hi)
+                if dphi(mid) > 0.0:
+                    hi = mid
+                else:
+                    lo = mid
+            step = 0.5 * (lo + hi)
+        f = f + step * d
+
+    is_alt = np.array([a for _, _, a in classes])
+    fA = f[is_alt].sum(0) if is_alt.any() else np.zeros(net.n_edges)
+    fS = f[~is_alt].sum(0) if (~is_alt).any() else np.zeros(net.n_edges)
+    return _fw_result(net, truth, alpha, fA, fS, rel_gap, it, converged)
+
+
 def frank_wolfe_mixed(
     net: BPRNetwork,
     alpha: float,
@@ -393,78 +499,15 @@ def frank_wolfe_mixed(
     """
     if not 0.0 <= alpha <= 1.0:
         raise ValueError("alpha must lie in [0, 1]")
-    truth = true_net or net
-    loader = _Loader(net)
-    disc = net.altruist_discount
+    zero = np.zeros(net.n_edges)
+    return frank_wolfe_multiclass(
+        net,
+        [(alpha, -net.altruist_discount, True), (1.0 - alpha, zero, False)],
+        true_net=true_net, alpha=alpha, max_iter=max_iter, tol=tol, verbose=verbose,
+    )
 
-    def phi(fA, fS):
-        return net.beckmann(fA + fS) - float(disc @ fA)
 
-    # Start from a free-flow all-or-nothing loading for each class.
-    c0 = net.costs(np.zeros(net.n_edges))
-    fA = loader.assign(c0 - disc, alpha)
-    fS = loader.assign(c0, 1.0 - alpha)
-
-    rel_gap, it, converged = np.inf, 0, False
-    ycA = ycS = None  # conjugate *target points* (feasible), not directions
-    for it in range(1, max_iter + 1):
-        x = fA + fS
-        c = net.costs(x)
-        gA, gS = c - disc, c
-        yA = loader.assign(gA, alpha)
-        yS = loader.assign(gS, 1.0 - alpha)
-
-        # Duality gap uses the plain Frank-Wolfe vertex, not the conjugate one.
-        gap = -(float(gA @ (yA - fA)) + float(gS @ (yS - fS)))
-        denom = max(float(c @ x), 1e-12)
-        rel_gap = gap / denom
-        if verbose and (it % 25 == 0 or it == 1):
-            print(f"  it {it:4d}  rel_gap {rel_gap:.3e}", flush=True)
-        if rel_gap < tol:
-            converged = True
-            break
-
-        # Conjugate Frank-Wolfe (Mitradjieva & Lindberg).  Blending the target
-        # *points* keeps every iterate a convex combination of feasible points,
-        # so flow conservation is preserved exactly; blending directions instead
-        # can push flows negative and silently destroy conservation.
-        if ycA is None:
-            ycA, ycS = yA, yS
-        else:
-            hess = _dcost(net, x)
-            pdx = (ycA - fA) + (ycS - fS)      # previous conjugate direction
-            ndx = (yA - fA) + (yS - fS)        # plain FW direction
-            D = float(hess @ (pdx * (ndx - pdx)))
-            if abs(D) > 1e-30:
-                th = float(hess @ (pdx * ndx)) / D
-                th = min(max(th, 0.0), 0.9999)
-            else:
-                th = 0.0
-            ycA = th * ycA + (1.0 - th) * yA
-            ycS = th * ycS + (1.0 - th) * yS
-        dA, dS = ycA - fA, ycS - fS
-
-        # Exact line search: phi'(s) is increasing in s, so bisect on it.
-        dx = dA + dS
-        const = float(disc @ dA)
-
-        def dphi(step):
-            return float(net.costs(x + step * dx) @ dx) - const
-
-        if dphi(1.0) <= 0.0:
-            step = 1.0
-        else:
-            lo, hi = 0.0, 1.0
-            for _ in range(60):
-                mid = 0.5 * (lo + hi)
-                if dphi(mid) > 0.0:
-                    hi = mid
-                else:
-                    lo = mid
-            step = 0.5 * (lo + hi)
-        fA = fA + step * dA
-        fS = fS + step * dS
-
+def _fw_result(net, truth, alpha, fA, fS, rel_gap, it, converged) -> FWResult:
     x = fA + fS
     c_true = truth.costs(x)
     total = truth.total_cost(x)
