@@ -143,25 +143,41 @@ def solve_stochastic(
 
     Aeq1, beq1 = _equality_block(net, net.demand())
     n_eq = Aeq1.shape[0]
-    B = sp.diags(net.b)
-    P = sp.bmat([[B] * n] * n, format="csc") + ridge * sp.eye(n * m, format="csc")
-    q = np.concatenate([net.a + d for _, d, _ in classes])
-    A = sp.vstack(
-        [sp.block_diag([Aeq1] * n, format="csc"), -sp.eye(n * m, format="csc")], format="csc"
+
+    # Variables are [f^1 ... f^n, x] with the coupling x = sum_k f^k imposed as
+    # a constraint.  Writing the quadratic on x alone keeps P diagonal with m
+    # nonzeros; stacking it as an n-by-n block matrix of diag(b) instead costs
+    # n^2 * m nonzeros and its factorisation runs out of memory by K ~ 100.
+    nv = n * m + m
+    P = sp.diags(np.concatenate([np.zeros(n * m), net.b]), format="csc")
+    q = np.concatenate([d for _, d, _ in classes] + [net.a])
+
+    couple = sp.hstack([sp.hstack([sp.eye(m, format="csc")] * n),
+                        -sp.eye(m, format="csc")], format="csc")
+    A_eq = sp.vstack([
+        sp.hstack([sp.block_diag([Aeq1] * n, format="csc"),
+                   sp.csc_matrix((n * n_eq, m))], format="csc"),
+        couple,
+    ], format="csc")
+    b_eq = np.concatenate(
+        [np.concatenate([s * beq1 for s, _, _ in classes]), np.zeros(m)]
     )
-    b = np.concatenate(
-        [np.concatenate([s * beq1 for s, _, _ in classes]), np.zeros(n * m)]
-    )
+    nonneg = sp.hstack([-sp.eye(n * m, format="csc"), sp.csc_matrix((n * m, m))],
+                       format="csc")
+    A = sp.vstack([A_eq, nonneg], format="csc")
+    b = np.concatenate([b_eq, np.zeros(n * m)])
+    P = P + ridge * sp.eye(nv, format="csc")
+
     st = clarabel.DefaultSettings()
     st.verbose = False
     for f in ("tol_gap_abs", "tol_gap_rel", "tol_feas"):
         setattr(st, f, tol)
     sol = clarabel.DefaultSolver(
         sp.triu(P, format="csc"), q, A, b,
-        [clarabel.ZeroConeT(n * n_eq), clarabel.NonnegativeConeT(n * m)], st,
+        [clarabel.ZeroConeT(n * n_eq + m), clarabel.NonnegativeConeT(n * m)], st,
     ).solve()
 
-    f = np.maximum(np.asarray(sol.x), 0.0).reshape(n, m)
+    f = np.maximum(np.asarray(sol.x)[: n * m], 0.0).reshape(n, m)
     x = f.sum(0)
     c_true = truth.costs(x)
     alt = np.array([is_a for _, _, is_a in classes])

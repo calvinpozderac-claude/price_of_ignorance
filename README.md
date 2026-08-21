@@ -60,12 +60,13 @@ poi/qp.py         the mixed-equilibrium convex QP (Clarabel) + a degeneracy cert
 poi/ignorance.py  perceived-cost mixing, and the ignorance/altruism composition
 poi/irregular.py  networks with unequal path lengths, to test that assumption
 poi/bpr.py        real road networks: TNTP data, BPR costs, Frank-Wolfe solver
+poi/stochastic.py idiosyncratic driver error with tunable correlation, + logit SUE
 poi/pigou.py      exact closed-form two-road solution, with and without ignorance
 poi/metrics.py    efficiency, saturation, exploitation gap, backfire
 poi/sweep.py      parallel disorder-averaged sweeps over (p, omega, alpha)
 experiments/      compute.py builds results/*.npz; plots.py renders figures/*.png
                   summary.py prints every headline number
-tests/            354 tests: both papers' sanity checks, closed forms vs solver,
+tests/            375 tests: both papers' sanity checks, closed forms vs solver,
                   equilibrium conditions, the analytic substitution law, the
                   published Sioux Falls equilibrium, and the robustness claims
 ```
@@ -482,6 +483,95 @@ opposite holds: better information and marginal-cost routing are *complements*,
 and the case for altruistic routing is strongest exactly where drivers are worst
 informed.
 
+## Part IV: what if drivers are wrong *independently*?
+
+Everything so far models ignorance as a **systematic bias** — every driver
+perceives the same wrong cost, in the same direction. Real perception error is
+partly idiosyncratic and partly shared, because drivers read the same signs and
+the same navigation app. `poi/stochastic.py` spans the two with one knob:
+
+```
+ε^k_e = σ · ( √ρ · ξ_e  +  √(1−ρ) · η^k_e )
+```
+
+`ξ` is drawn once per link and shared; `η` is drawn per driver type. `Var(ε) = σ²`
+for every `ρ`, so **magnitude and correlation move independently**. `ρ = 1` is the
+papers' regime; `ρ = 0` is textbook stochastic user equilibrium.
+
+**Why it stays convex.** The error is additive and *flow-independent*, so every
+type's Jacobian row is `c'(x)` — symmetric, hence a potential exists:
+
+```
+Φ({f^k}) = Σ_e ∫₀^{x_e} c_e  +  Σ_k Σ_e δ^k_e · f^k_e
+```
+
+with `δ = ε` for a selfish type and `δ = −disc + ε/(β+1)` for an altruistic one.
+Randomising *which type a road is*, or its capacity, would perturb `b_e` instead,
+break the symmetry, and leave no potential — that variant needs a
+variational-inequality solver and is not attempted here. Two independent
+implementations agree: a `K`-type multi-class QP/Frank–Wolfe with Gaussian link
+errors, and `dial_logit`, which solves the `ρ = 0` Gumbel continuum exactly by
+Dial's algorithm on the acyclic lattice (no Monte Carlo, no path enumeration).
+
+### 13. Correlation, not magnitude, decides the sign
+
+![Stochastic](figures/fig15_stochastic.png)
+
+At `p_c` on the lattice, the best achievable benefit and the damage at `σ = 1`:
+
+| `ρ` | best benefit | at `σ` | damage at `σ = 1` |
+|---|---|---|---|
+| 0.00 | **−1.65%** | 0.10 | +50% |
+| 0.25 | −0.78% | 0.05 | +63% |
+| 0.50 | −0.30% | 0.02 | +79% |
+| 0.75 | −0.07% | 0.02 | +103% |
+| 1.00 | **none** | — | +163% |
+
+The beneficial window shrinks monotonically with correlation and **closes
+entirely at `ρ = 1`**, while the damage at large `σ` triples. Shared error is
+categorically the more dangerous kind.
+
+**A methodological trap worth flagging.** Finite `K` is itself a correlation
+knob — a handful of types is a handful of coordinated groups. At `σ = 0.10`,
+`ρ = 0`: `K = 1` reads **+8.65%** (harmful), `K = 16` is neutral, `K = 256` is
+**−2.14%**. I got the sign of this result wrong on my first pass by using
+`K = 12`. The Dial continuum independently gives −1.55% at `θ = 10`, from an
+entirely different error structure.
+
+### 14. Altruism reverses — but on the other side
+
+The altruism effect (`α: 0 → 1`) across `σ`:
+
+| | σ=0 | 0.05 | 0.15 | 0.30 | 0.45 | 1.00 |
+|---|---|---|---|---|---|---|
+| `ρ = 0` | −4.8% | −3.1% | **+0.5%** | +4.1% | +5.3% | +3.1% |
+| `ρ = 1` | −4.8% | −5.8% | −10.2% | −12.1% | −12.6% | **−13.4%** |
+
+I predicted the reversal was a `ρ ≈ 1` phenomenon that would dissolve as `ρ → 0`.
+**That was exactly backwards.** Altruism reverses under *independent* error and
+becomes steadily more valuable under *shared* error.
+
+The underlying rule from Part III survives intact, though, and explains both:
+altruism backfires precisely where the uncertainty is **already doing corrective
+work**. Independent error mildly corrects (it is the only regime with a
+beneficial window), so altruists over-correct on top of it. Shared random error
+only damages, so altruists repair. The same rule covered the tuned `ω` bias,
+which corrects by construction and so also produced a reversal.
+
+### 15. Off the lattice
+
+![Transfer](figures/fig16_stochastic_transfer.png)
+
+On unequal path lengths and on real road networks, independent error is far
+gentler than shared error over the range that matters — at `p = 0.9, σ = 0.35` on
+the skip-DAG, +62% versus +317% — but the benefit is small or absent. Sioux Falls
+gets at most **−0.69%** from independent error (`σ = 0.2`; −0.79% at `K = 96`),
+and Eastern Massachusetts gets nothing. The ordering does reverse at extreme `σ`,
+where independent drivers scatter over genuinely bad routes while a shared bias
+at least keeps everyone coherent.
+
+Altruism helps on both real networks at every `σ` and every `ρ` tested, by 3–11%.
+
 ## Caveats
 
 * Costs are affine (`c = 1` or `c = x`), matching the paper. Roughgarden–Tardos
@@ -491,13 +581,14 @@ informed.
   taking others' choices as given. A central planner who anticipated the selfish
   response (Stackelberg routing) would do better, and is a bilevel problem, not
   a QP.
-* Ignorance is modelled as a *bias*, not as noise: every driver blends the two
-  cost functions the same way, rather than each drawing an independent wrong
-  guess. That is the ignorance paper's own construction, and it is what keeps
-  perceived costs affine and the problem a QP. This is the largest remaining
-  conceptual gap, and it is untested here: independent errors would act like
-  mixed strategies and generically help, whereas correlated bias (which is what
-  a navigation app produces) can be far more damaging.
+* Parts I–III model ignorance as a *bias*; Part IV adds the idiosyncratic case
+  and shows the correlation matters more than the magnitude. What is still not
+  modelled is error on the *congestion* parameters: randomising `b_e` or a link's
+  capacity per driver destroys the potential-function structure, so that variant
+  needs a variational-inequality solver.
+* The real-network stochastic runs use `K = 12` driver types for cost. That
+  slightly understates the `ρ = 0` benefit (−0.69% versus −0.79% at `K = 96` on
+  Sioux Falls), so those numbers are conservative rather than wrong.
 * The real-network ignorance model is *analogous* to the lattice one, not
   identical: `ω` is not on the same scale in the two settings, so only the
   qualitative endpoints are comparable.

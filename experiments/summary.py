@@ -257,6 +257,52 @@ def irregular():
     print("       altruists repair it instead of over-correcting.")
 
 
+def stochastic():
+    head("Idiosyncratic error: magnitude sigma, correlation rho")
+    d = load(os.path.join(RESULTS, "stochastic_lattice.npz"))
+    sg, rh, C = d["sigma"], d["rho"], d["C"]
+    b = C[0, 0, 0]
+    print(f"  lattice L={int(d['L'])} p=pc, K={int(d['K'])} types, {int(d['n_seeds'])} networks")
+    print("  best achievable benefit, and where:")
+    for j, r in enumerate(rh):
+        i = int(np.argmin(C[:, j, 0]))
+        print(f"    rho={r:.2f}:  {100*(C[i,j,0]/b-1):+.2f}% at sigma={sg[i]:.2f}"
+              f"   |  damage at sigma=1: {100*(C[-1,j,0]/b-1):+.0f}%")
+    print("\n  the beneficial window shrinks with correlation and closes at rho=1")
+
+    k = load(os.path.join(RESULTS, "stochastic_convergence.npz"))
+    print(f"\n  type-count convergence at sigma={float(k['sigma']):.2f} (% change in C):")
+    print("    K:      " + " ".join(f"{int(v):6d}" for v in k["K"]))
+    print("    rho=0   " + " ".join(f"{100*(v-1):+6.2f}" for v in k["rho0"]))
+    print("    rho=0.5 " + " ".join(f"{100*(v-1):+6.2f}" for v in k["rho05"]))
+    print(f"    K=1 is a single shared bias, so it reads as rho=1; the answer only")
+    print(f"    settles past K ~ 64.")
+    print(f"    Dial logit continuum (Gumbel path errors, exact): "
+          f"{100*(k['dial'].min()-1):+.2f}% at theta={k['theta'][int(k['dial'].argmin())]:.0f}")
+
+    print("\n  altruism effect (alpha 0 -> 1), % change in C:")
+    print("    sigma:  " + " ".join(f"{v:6.2f}" for v in sg))
+    for j in (0, rh.size - 1):
+        print(f"    rho={rh[j]:.0f}   " + " ".join(
+            f"{100*(C[i,j,-1]/C[i,j,0]-1):+6.2f}" for i in range(sg.size)))
+    print("    altruism reverses sign under INDEPENDENT error and helps ever more")
+    print("    under SHARED error -- the opposite way round from the prediction,")
+    print("    but consistent with the rule: altruism backfires exactly where the")
+    print("    uncertainty is already doing corrective work.")
+
+    if os.path.exists(os.path.join(RESULTS, "stochastic_real.npz")):
+        r = load(os.path.join(RESULTS, "stochastic_real.npz"))
+        names = [str(x) for x in r["names"]]
+        sg2, C2 = r["sigma"], r["C"]
+        print(f"\n  real road networks (K={int(r['K'])}, max FW gap {np.nanmax(r['rel_gap']):.1e}):")
+        for i, n in enumerate(names):
+            base = C2[i, 0, 0, 0]
+            ind = C2[i, :, 0, 0] / base
+            j = int(np.argmin(ind))
+            print(f"    {n}: best independent-error benefit {100*(ind[j]-1):+.2f}% at sigma={sg2[j]:.2f}"
+                  f"; shared error best {100*(np.min(C2[i,:,1,0]/base)-1):+.2f}%")
+
+
 if __name__ == "__main__":
     warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN slices at alpha 0 and 1
     for name, fn in [
@@ -270,6 +316,7 @@ if __name__ == "__main__":
         ("substitution", substitution),
         ("irregular", irregular),
         ("real_networks", real_networks),
+        ("stochastic_lattice", stochastic),
     ]:
         if name is None or os.path.exists(os.path.join(RESULTS, name + ".npz")):
             fn()

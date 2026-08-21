@@ -1057,6 +1057,135 @@ def fig_irregular():
 ALL.update({"real": fig_real_networks, "irregular": fig_irregular})
 
 
+# ================= idiosyncratic uncertainty: (sigma, rho) ==================
+
+def fig_stochastic():
+    """Correlation, not magnitude, decides whether uncertainty helps."""
+    d = load(os.path.join(RESULTS, "stochastic_lattice.npz"))
+    sg, rh, al, C = d["sigma"], d["rho"], d["alpha"], d["C"]
+    base = C[0, 0, 0]
+
+    fig, axes = plt.subplots(1, 3, figsize=(12.8, 3.9))
+
+    ax = axes[0]
+    for j, c in zip(range(rh.size), ordinal(rh.size)):
+        y = 100 * (C[:, j, 0] / base - 1)
+        ax.plot(sg, y, color=c, label=rf"$\rho={rh[j]:.2f}$")
+    ax.axhline(0.0, color=INK, lw=1.0)
+    ax.set_xlabel(r"error magnitude $\sigma$")
+    ax.set_ylabel(r"% change in $C$ vs no error")
+    ax.set_title("(a)  Same error, opposite sign", loc="left")
+    ax.legend(loc="upper left", title="correlation", fontsize=7.5, title_fontsize=8)
+    # The runaway damage at large sigma buries the beneficial window, so zoom it.
+    ins = ax.inset_axes([0.44, 0.34, 0.53, 0.44])
+    ins.set_facecolor(SURFACE)
+    ins.patch.set_alpha(1.0)
+    ins.set_zorder(5)
+    for sp in ins.spines.values():
+        sp.set_visible(True)
+        sp.set_color(AXIS)
+    keep = sg <= 0.26
+    for j, c in zip(range(rh.size), ordinal(rh.size)):
+        ins.plot(sg[keep], 100 * (C[keep, j, 0] / base - 1), color=c)
+    ins.axhline(0.0, color=INK, lw=0.9)
+    ins.set_ylim(-2.2, 3.0)
+    ins.tick_params(labelsize=6.5)
+    ins.set_title("zoom: small $\\sigma$", fontsize=7.5, color=INK_2, loc="left", pad=2)
+    ins.grid(True, color=GRID, lw=0.5)
+    ins.text(0.03, 0.06, "helps", transform=ins.transAxes, fontsize=6.5, color=INK_2)
+    ins.set_xlim(0, 0.26)
+
+    ax = axes[1]
+    k = load(os.path.join(RESULTS, "stochastic_convergence.npz"))
+    for key, c, lab in [("rho0", BLUE, r"$\rho = 0$"), ("rho05", ORANGE, r"$\rho = 0.5$")]:
+        ax.semilogx(k["K"], 100 * (k[key] - 1), color=c, marker="o", ms=3.5, label=lab)
+    ax.axhline(0.0, color=INK, lw=1.0)
+    ax.axhline(100 * (k["dial"].min() - 1), color=AQUA, lw=1.4, ls=(0, (5, 2)))
+    ax.text(1.15, 100 * (k["dial"].min() - 1), "logit continuum (Dial)",
+            color=AQUA, fontsize=7.5, va="bottom", ha="left")
+    ax.set_xlabel("number of driver types $K$")
+    ax.set_ylabel(r"% change in $C$ vs no error")
+    ax.set_title(r"(b)  Too few types looks like $\rho>0$", loc="left")
+    ax.legend(loc="upper right")
+
+    ax = axes[2]
+    for j, lab, c in [(0, r"$\rho=0$ (independent)", BLUE), (rh.size - 1, r"$\rho=1$ (shared)", ORANGE)]:
+        eff = 100 * (C[:, j, -1] / C[:, j, 0] - 1)
+        ax.plot(sg, eff, color=c, label=lab)
+    ax.axhline(0.0, color=INK, lw=1.0)
+    ax.set_xlabel(r"error magnitude $\sigma$")
+    ax.set_ylabel(r"% change in $C$, $\alpha: 0 \to 1$")
+    ax.set_title("(c)  Does altruism still help?", loc="left")
+    ax.legend(loc="upper left")
+    ax.text(0.97, 0.06, "below zero = altruism helps", transform=ax.transAxes,
+            fontsize=7.5, color=INK_2, ha="right", va="bottom")
+
+    fig.suptitle(
+        "Whether ignorance helps depends on whether drivers are wrong together",
+        x=0.008, y=0.99, ha="left", fontsize=12, fontweight="bold", color=INK,
+    )
+    fig.text(
+        0.008, 0.93,
+        r"$\varepsilon^k_e = \sigma(\sqrt{\rho}\,\xi_e + \sqrt{1-\rho}\,\eta^k_e)$: magnitude and correlation move "
+        r"independently. Lattice, $p=p_c$, $L=" + f"{int(d['L'])}$, {int(d['n_seeds'])} networks.",
+        ha="left", fontsize=8.5, color=INK_2,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.90))
+    _save(fig, "fig15_stochastic.png")
+
+
+def fig_stochastic_transfer():
+    """Does the independent-error benefit survive off the lattice?"""
+    fig, axes = plt.subplots(1, 2, figsize=(9.6, 3.9))
+
+    ax = axes[0]
+    d = load(os.path.join(RESULTS, "stochastic_irregular.npz"))
+    sg, ps, C = d["sigma"], d["p"], d["C"]
+    for i, c in zip(range(ps.size), SERIES):
+        ax.plot(sg, 100 * (C[i, :, 0] - 1), color=c, label=f"$p={ps[i]:.1f}$")
+        ax.plot(sg, 100 * (C[i, :, 1] - 1), color=c, ls=(0, (4, 2)), lw=1.3)
+    ax.axhline(0.0, color=INK, lw=1.0)
+    ax.set_xlabel(r"error magnitude $\sigma$")
+    ax.set_ylabel(r"% change in $C$ vs no error")
+    ax.set_title("(a)  Unequal path lengths", loc="left")
+    h = [plt.Line2D([], [], color=INK_2, lw=1.6), plt.Line2D([], [], color=INK_2, lw=1.3, ls="--")]
+    ax.legend(ax.get_lines()[::2][:ps.size] + h,
+              [f"$p={v:.1f}$" for v in ps] + [r"$\rho=0$", r"$\rho=1$"],
+              loc="upper left", ncol=2, fontsize=7.5)
+
+    ax = axes[1]
+    r = load(os.path.join(RESULTS, "stochastic_real.npz"))
+    names = [str(x) for x in r["names"]]
+    sg2, C2 = r["sigma"], r["C"]
+    for i, (n, c) in enumerate(zip(names, SERIES)):
+        b = C2[i, 0, 0, 0]
+        ax.plot(sg2, 100 * (C2[i, :, 0, 0] / b - 1), color=c, label=n.split("-")[0])
+        ax.plot(sg2, 100 * (C2[i, :, 1, 0] / b - 1), color=c, ls=(0, (4, 2)), lw=1.3)
+    ax.axhline(0.0, color=INK, lw=1.0)
+    ax.set_xlabel(r"error magnitude $\sigma$ (coeff. of variation)")
+    ax.set_ylabel(r"% change in $C$ vs no error")
+    ax.set_title("(b)  Real road networks", loc="left")
+    ax.legend(loc="upper left", fontsize=7.5)
+    ax.text(0.97, 0.06, "solid $\\rho=0$,  dashed $\\rho=1$", transform=ax.transAxes,
+            fontsize=7.5, color=INK_2, ha="right", va="bottom")
+
+    fig.suptitle(
+        "Shared error does the greater damage at realistic magnitudes",
+        x=0.008, y=0.99, ha="left", fontsize=12, fontweight="bold", color=INK,
+    )
+    fig.text(
+        0.008, 0.93,
+        "Solid: independent drivers. Dashed: everyone wrong the same way, at identical magnitude. The ordering "
+        r"reverses only at extreme $\sigma$, where independent drivers scatter over genuinely bad routes.",
+        ha="left", fontsize=8.5, color=INK_2,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.90))
+    _save(fig, "fig16_stochastic_transfer.png")
+
+
+ALL.update({"stochastic": fig_stochastic, "stochastic_transfer": fig_stochastic_transfer})
+
+
 if __name__ == "__main__":
     os.makedirs(FIGURES, exist_ok=True)
     use_style()
