@@ -1351,29 +1351,37 @@ def fig_evolution_stochastic():
 
     # (c) what the settled population is worth
     ax = axes[2]
-    cols = ordinal(rh.size)
-    for j, c in enumerate(cols):
-        ax.plot(sg, 100 * G[j], color=c, lw=1.9, marker="o", ms=3.4)
-        k = int(np.argmax(G[j])) if G[j].max() > 1e-3 else sg.size - 1
-        direct_label(ax, sg[k], 100 * G[j][k], rf"$\rho={rh[j]:g}$", c,
-                     dy=10 if G[j].max() > 1e-3 else -11)
+    dead = []
+    for j, c in enumerate(ordinal(rh.size)):
+        alive = G[j].max() > 1e-3
+        ax.plot(sg, 100 * G[j], color=c if alive else MUTED, lw=1.9 if alive else 1.2,
+                marker="o", ms=3.4 if alive else 2.6, zorder=3 if alive else 2)
+        if alive:
+            k = int(np.argmax(G[j] > 0.5 * G[j].max()))
+            direct_label(ax, sg[k], 100 * G[j][k], rf"$\rho={rh[j]:g}$", c,
+                         dx=0.015, dy=-13 if j == rh.size - 1 else 12)
+        else:
+            dead.append(f"{rh[j]:g}")
     ax.axhline(0.0, color=INK, lw=1.0)
+    ax.text(0.97, 0.155, rf"$\rho$ = {', '.join(dead)}: altruism never survives",
+            transform=ax.transAxes, ha="right", fontsize=8, color=INK_2)
+    ax.set_ylim(-9, 112)
     ax.set_xlabel(r"error magnitude $\sigma$")
     ax.set_ylabel("gain captured with no enforcement (%)")
     ax.set_title("c.  How much efficiency arrives\n      for free", loc="left")
 
     fig.suptitle(
         "Shared uncertainty is what makes unselfishness pay for itself",
-        x=0.008, y=0.99, ha="left", fontsize=12, fontweight="bold", color=INK,
+        x=0.008, y=0.995, ha="left", fontsize=12, fontweight="bold", color=INK,
     )
     fig.text(
-        0.008, 0.925,
+        0.008, 0.905,
         "When every driver misjudges the same road the same way, the altruist's detour lands on roads the "
-        "crowd has mistakenly avoided,\nso being unselfish and being right coincide. Independent errors "
+        "crowd has mistakenly avoided, so being\nunselfish and being right coincide. Independent errors "
         "already spread the traffic, leaving the altruist nothing to gain.",
         ha="left", fontsize=8.5, color=INK_2,
     )
-    fig.tight_layout(rect=(0, 0, 1, 0.875))
+    fig.tight_layout(rect=(0, 0, 1, 0.865))
     _save(fig, "fig18_evolution_stochastic.png")
 
 

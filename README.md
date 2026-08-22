@@ -676,6 +676,50 @@ The one caveat: `D(1) = −0.092` at `ω = 0.4` is an extrapolation, so "complet
 takeover" there means the altruist is still ahead at the last sampled point
 (`α = 0.9`, `D = −0.109`), and the curve's slope carries it past 1.
 
+### 18. Random error: correlation decides survival, magnitude decides how much
+
+Part IV's headline was that the *correlation* of driver error, not its
+magnitude, decides whether uncertainty helps or hurts. The evolutionary question
+answers the same way, and more sharply.
+
+Settled altruistic fraction `α*` on the lattice at `p_c`, from `α₀ = 0.5`
+(`L = 8`, `K = 48` driver types, 12 layouts):
+
+| `ρ` \ `σ` | 0 | 0.05 | 0.1 | 0.2 | 0.3 | 0.45 | 0.7 |
+|---|---|---|---|---|---|---|---|
+| 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 0.25 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 0.5 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 0.75 | 0 | 0 | 0 | **0.13** | **0.24** | **0.43** | **0.63** |
+| 1 | 0 | 0 | **0.11** | **0.84** | **0.82** | **0.86** | **1.00** |
+
+![Evolutionary stability under random error](figures/fig18_evolution_stochastic.png)
+
+Below `ρ = 0.75` altruism dies at *every* magnitude tested — piling on more
+uncertainty never rescues it. Above it, altruism invades as soon as the error is
+large enough to matter, and the fraction it settles at rises with `σ`.
+
+The efficiency this buys is close to total. At `ρ = 1` and `σ ≥ 0.2` the settled
+population captures **99%** of the entire gap between anarchy and the social
+optimum — no tolls, no mandates, no coordination, just drivers copying whoever
+got home sooner. At `ρ = 0.75` it climbs from 22% at `σ = 0.2` to 93% at
+`σ = 0.7`.
+
+This is the flip side of Part IV's finding 14, and the two now fit together as
+one statement. Independent error *already* scatters traffic off the crowded
+roads, which is why it lowers the average commute (−1.65% at `ρ = 0`) and why an
+altruist adds nothing — she pays for a correction that has already happened
+(`D(0) = +0.36` and rising). Shared error moves everybody the same wrong way, so
+nothing is corrected: the average commute is worse (+163% at `σ = 1`), the
+altruist's marginal-cost routing is the only thing pointing at the right roads,
+and she is rewarded for it (`D(0) = −1.43` at `σ = 0.3`). Uncertainty that helps
+crowds out altruism; uncertainty that hurts recruits it.
+
+**The rule from Parts II–IV survives intact, and now cuts both ways.** Altruism
+backfires exactly where something else is already correcting the traffic — and in
+precisely those regimes it also cannot pay its own way, so it would not be
+adopted even if it did help.
+
 ## Caveats
 
 * Costs are affine (`c = 1` or `c = x`), matching the paper. Roughgarden–Tardos
