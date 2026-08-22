@@ -744,7 +744,8 @@ Three differences from the lattice are worth stating:
 * **It arrives only once the error is doing real damage.** Sioux Falls flips
   between `σ = 0.4` and `σ = 0.7`, where random error has stopped helping and is
   costing +4 to +5% of average commute; Eastern Massachusetts flips at `σ = 0.4`
-  (`ρ = 1`), costing +10%. Which is the rule again, from the harshest side:
+  (`ρ = 1`, re-solved at `tol = 1e-7` to confirm the sign), costing +10%. Which
+  is the rule again, from the harshest side:
   altruism becomes individually worthwhile exactly when the uncertainty has
   become bad enough to leave real damage for it to repair.
 
@@ -779,9 +780,11 @@ adopted even if it did help.
 * The evolutionary results read the sign of `C_A - C_S`, a *difference* between
   two class averages, which is a harder quantity for a solver than the total
   cost. On the lattice it is exact to `~1e-6`. On the real networks it rests on
-  Frank-Wolfe: most cells have a relative gap below `1e-4`, but Eastern
-  Massachusetts at `ρ = 1, σ = 0.4` reaches `1.4e-3`, so that one crossover is
-  suggestive rather than settled.
+  Frank-Wolfe: most cells have a relative gap below `1e-4`, and the loosest —
+  Eastern Massachusetts at `ρ = 1, σ = 0.4`, at `1.4e-3` — was re-solved at
+  `tol = 1e-7` to check. It holds: `D = -0.0091 / -0.0223 / -0.0478` at
+  `α = 0.1 / 0.5 / 0.9` against gaps of `6e-8` to `1.6e-6`, matching the sweep to
+  `~0.001` and confirming the sign.
 * Imitation assumes a driver can observe another class's outcome and switch
   freely. It is the standard model, but it makes the altruistic fraction respond
   only to *realised* travel time — an altruist who values having behaved well
