@@ -715,6 +715,39 @@ altruist's marginal-cost routing is the only thing pointing at the right roads,
 and she is rewarded for it (`D(0) = −1.43` at `σ = 0.3`). Uncertainty that helps
 crowds out altruism; uncertainty that hurts recruits it.
 
+### 19. Random error on real road networks
+
+The same test on Sioux Falls and Eastern Massachusetts (`K = 12` driver types,
+BPR costs, multi-class Frank–Wolfe) agrees on direction and disagrees on scale.
+
+| network | `ρ` | `σ = 0` | 0.1 | 0.2 | 0.4 | 0.7 |
+|---|---|---|---|---|---|---|
+| Sioux Falls | 0 | +1.28 | +1.14 | +1.04 | +0.40 | **−0.06** |
+| Sioux Falls | 1 | +1.28 | +1.00 | +0.70 | **+0.02** | **−0.98** |
+| E. Massachusetts | 0 | +0.033 | +0.028 | +0.033 | +0.032 | **−0.013** |
+| E. Massachusetts | 1 | +0.033 | +0.031 | +0.013 | **−0.011** | **−0.015** |
+
+(the lone altruist's penalty `D(0)`; bold where altruism is at or past invasion)
+
+Three differences from the lattice are worth stating:
+
+* **Same direction, weaker lever.** Shared error still moves the system toward
+  altruism faster than independent error at every `σ` on both networks — Eastern
+  Massachusetts crosses over one step earlier at `ρ = 1` — but the correlation
+  gap is nothing like the lattice's clean `ρ = 0.75` threshold. Real networks
+  need a genuinely large error before anything happens, and then both
+  correlations get there.
+* **No mixed equilibrium.** `D` flips sign along its whole length rather than
+  crossing zero in the interior, so the outcome is all-or-nothing: altruism
+  either dies or takes over completely. The stable interior mixtures of finding
+  17 are a feature of *systematic* ignorance, not of random error.
+* **It arrives only once the error is doing real damage.** Sioux Falls flips
+  between `σ = 0.4` and `σ = 0.7`, where random error has stopped helping and is
+  costing +4 to +5% of average commute; Eastern Massachusetts flips at `σ = 0.4`
+  (`ρ = 1`), costing +10%. Which is the rule again, from the harshest side:
+  altruism becomes individually worthwhile exactly when the uncertainty has
+  become bad enough to leave real damage for it to repair.
+
 **The rule from Parts II–IV survives intact, and now cuts both ways.** Altruism
 backfires exactly where something else is already correcting the traffic — and in
 precisely those regimes it also cannot pay its own way, so it would not be
@@ -743,6 +776,16 @@ adopted even if it did help.
 * Frank-Wolfe converges sublinearly. Reported relative gaps are median 3.5e-6,
   max 1.2e-3 (7 of 330 cells, all in Eastern Massachusetts); differences below
   ~0.2% on that network should be treated as unresolved.
+* The evolutionary results read the sign of `C_A - C_S`, a *difference* between
+  two class averages, which is a harder quantity for a solver than the total
+  cost. On the lattice it is exact to `~1e-6`. On the real networks it rests on
+  Frank-Wolfe: most cells have a relative gap below `1e-4`, but Eastern
+  Massachusetts at `ρ = 1, σ = 0.4` reaches `1.4e-3`, so that one crossover is
+  suggestive rather than settled.
+* Imitation assumes a driver can observe another class's outcome and switch
+  freely. It is the standard model, but it makes the altruistic fraction respond
+  only to *realised* travel time — an altruist who values having behaved well
+  regardless of her commute is outside it, and would shift every threshold here.
 * `γ*(ω)` is derived by dropping the `Σ_slow x²` term. That term is subleading
   in `L` (the ignorance paper's argument), which is why the law is accurate to
   ~0.02 rather than exact, with the largest deviation at small `p` where the most
