@@ -303,6 +303,89 @@ def stochastic():
                   f"; shared error best {100*(np.min(C2[i,:,1,0]/base)-1):+.2f}%")
 
 
+def evolution():
+    """Study 1: does altruism survive when drivers can copy whoever is faster?"""
+    from poi.evolution import invasion_signs, settle
+
+    head("Evolutionary stability: can altruism sustain itself?")
+    print("  imitation dynamics  d(alpha)/dt = alpha (1-alpha) (C_S - C_A)")
+    print("  D(0) < 0 means a lone altruist in a selfish crowd already arrives sooner.")
+
+    d = load(os.path.join(RESULTS, "joint_surface.npz"))
+    p, w, al = d["p"], d["omega"], d["alpha"]
+    C, CA, CS = (np.nanmean(d[k], axis=2) for k in ("C", "CA", "CS"))
+    print("\n  LATTICE, systematic ignorance -- D(0), the lone altruist's penalty")
+    print("    omega:  " + " ".join(f"{v:6.2f}" for v in w[::3]))
+    for i in range(p.size):
+        row = [invasion_signs(al, CA[i, j] - CS[i, j])[0] for j in range(0, w.size, 3)]
+        print(f"    p={p[i]:.3f} " + " ".join(f"{v:+6.2f}" for v in row))
+    n_inv = sum(invasion_signs(al, CA[i, j] - CS[i, j])[0] < 0
+                for i in range(p.size) for j in range(w.size))
+    print(f"    altruism invades in {n_inv} of {p.size * w.size} cells -- it never does,")
+    print("    and ignorance makes the altruist's penalty larger, not smaller.")
+
+    if os.path.exists(os.path.join(RESULTS, "real_networks.npz")):
+        r = load(os.path.join(RESULTS, "real_networks.npz"))
+        names = [str(x) for x in r["names"]]
+        w2, al2 = r["omega"], r["alpha"]
+        print("\n  REAL NETWORKS, systematic ignorance -- the opposite answer")
+        for i, n in enumerate(names):
+            print(f"    {n}")
+            print("      omega   D(0)     D(1)   settled alpha   gain captured")
+            for j in range(0, w2.size, 2):
+                D = r["CA"][i, j] - r["CS"][i, j]
+                d0, d1 = invasion_signs(al2, D)
+                e = settle(al2, D, r["C"][i, j], alpha0=0.5)
+                print(f"      {w2[j]:.2f}  {d0:+7.3f}  {d1:+7.3f}   {e.alpha_star:11.3f}"
+                      f"   {100*e.gain:11.1f}%")
+            first = next((w2[j] for j in range(w2.size)
+                          if invasion_signs(al2, r["CA"][i, j] - r["CS"][i, j])[0] < 0), None)
+            print(f"      altruism first invades at omega = "
+                  f"{'never' if first is None else f'{first:.2f}'}")
+
+    f = os.path.join(RESULTS, "evolution_stochastic.npz")
+    if os.path.exists(f):
+        e = load(f)
+        sg, rh, al3 = e["sigma"], e["rho"], e["alpha"]
+        C3, CA3, CS3 = (np.nanmean(e[k], axis=3) for k in ("C", "CA", "CS"))
+        print(f"\n  LATTICE, idiosyncratic error (L={int(e['L'])}, K={int(e['K'])}, "
+              f"{int(e['n_seeds'])} networks)")
+        print("    settled altruistic fraction, from alpha0 = 0.5")
+        print("    sigma:   " + " ".join(f"{v:5.2f}" for v in sg))
+        for j, rv in enumerate(rh):
+            row = [settle(al3, CA3[i, j] - CS3[i, j], C3[i, j], alpha0=0.5).alpha_star
+                   for i in range(sg.size)]
+            print(f"    rho={rv:.2f} " + " ".join(f"{v:5.2f}" for v in row))
+        print("\n    share of the achievable gain the settled population captures")
+        print("    sigma:   " + " ".join(f"{v:5.2f}" for v in sg))
+        for j, rv in enumerate(rh):
+            row = [settle(al3, CA3[i, j] - CS3[i, j], C3[i, j], alpha0=0.5).gain
+                   for i in range(sg.size)]
+            print(f"    rho={rv:.2f} " + " ".join(f"{100*v:4.0f}%" for v in row))
+        best = max(((i, j) for i in range(sg.size) for j in range(rh.size)),
+                   key=lambda t: settle(al3, CA3[t[0], t[1]] - CS3[t[0], t[1]],
+                                        C3[t[0], t[1]], alpha0=0.5).alpha_star)
+        b = settle(al3, CA3[best] - CS3[best], C3[best], alpha0=0.5)
+        print(f"\n    highest self-sustaining altruism: alpha* = {b.alpha_star:.2f} at "
+              f"sigma={sg[best[0]]:.2f}, rho={rh[best[1]]:.2f}"
+              f"  ({100*b.gain:.0f}% of the gain, unenforced)")
+
+    f = os.path.join(RESULTS, "evolution_real.npz")
+    if os.path.exists(f):
+        e = load(f)
+        names = [str(x) for x in e["names"]]
+        sg, rh, al4 = e["sigma"], e["rho"], e["alpha"]
+        print(f"\n  REAL NETWORKS, idiosyncratic error (K={int(e['K'])}, "
+              f"max FW gap {np.nanmax(e['rel_gap']):.1e})")
+        for i, n in enumerate(names):
+            print(f"    {n}: settled alpha")
+            print("      sigma: " + " ".join(f"{v:5.2f}" for v in sg))
+            for j, rv in enumerate(rh):
+                row = [settle(al4, e["CA"][i, k, j] - e["CS"][i, k, j],
+                              e["C"][i, k, j], alpha0=0.5).alpha_star for k in range(sg.size)]
+                print(f"      rho={rv:.0f}  " + " ".join(f"{v:5.2f}" for v in row))
+
+
 if __name__ == "__main__":
     warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN slices at alpha 0 and 1
     for name, fn in [
@@ -317,6 +400,7 @@ if __name__ == "__main__":
         ("irregular", irregular),
         ("real_networks", real_networks),
         ("stochastic_lattice", stochastic),
+        ("joint_surface", evolution),
     ]:
         if name is None or os.path.exists(os.path.join(RESULTS, name + ".npz")):
             fn()

@@ -563,7 +563,124 @@ def stochastic_real():
           "C": C, "rel_gap": G, "K": K})
 
 
+def _evo_job(args):
+    """One lattice realisation: the (sigma, rho, alpha) cube of C, C_A and C_S."""
+    from poi.stochastic import solve_stochastic
+
+    L, p, seed, sigmas, rhos, alphas, K = args
+    net = square_lattice(L, float(p), rng=seed)
+    shape = (sigmas.size, rhos.size, alphas.size)
+    C = np.empty(shape)
+    CA = np.empty(shape)
+    CS = np.empty(shape)
+    for i, sg in enumerate(sigmas):
+        for j, rh in enumerate(rhos):
+            if sg == 0.0 and j > 0:
+                # Zero-magnitude error does not depend on its correlation.
+                C[i, j], CA[i, j], CS[i, j] = C[i, 0], CA[i, 0], CS[i, 0]
+                continue
+            for k, al in enumerate(alphas):
+                r = solve_stochastic(net, float(sg), float(rh), K,
+                                     alpha=float(al), rng=10_000 + seed)
+                C[i, j, k] = r.total_cost
+                CA[i, j, k] = r.cost_altruist
+                CS[i, j, k] = r.cost_selfish
+    return seed, C, CA, CS
+
+
+def evolution_stochastic():
+    """Class costs across the (sigma, rho) plane -- the input to the dynamics.
+
+    :mod:`poi.evolution` needs ``C_A - C_S`` as a function of ``alpha``, not just
+    the average cost, because imitation is driven by what each class personally
+    experiences.  ``joint_surface`` already supplies that for *systematic*
+    ignorance; this run supplies it for idiosyncratic error.
+    """
+    _banner("Evolution of altruism -- class costs on the (sigma, rho) plane")
+    from concurrent.futures import ProcessPoolExecutor
+
+    L, K, n_seeds, p = 8, 48, 12, PC_SQUARE
+    sigmas = np.array([0.0, 0.05, 0.1, 0.2, 0.3, 0.45, 0.7])
+    rhos = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
+    # alpha = 0 and 1 leave one class empty, so the gap is only defined strictly
+    # inside; poi.evolution extrapolates to the endpoints from the two nearest
+    # samples, which is exactly the "lone altruist" reading.
+    alphas = np.linspace(0.05, 0.95, 9)
+    shape = (sigmas.size, rhos.size, alphas.size, n_seeds)
+    C = np.full(shape, np.nan)
+    CA = np.full(shape, np.nan)
+    CS = np.full(shape, np.nan)
+    jobs = [(L, p, s, sigmas, rhos, alphas, K) for s in range(n_seeds)]
+    done = 0
+    t0 = time.time()
+    with ProcessPoolExecutor(max_workers=n_workers()) as ex:
+        for seed, c, ca, cs in ex.map(_evo_job, jobs, chunksize=1):
+            C[..., seed], CA[..., seed], CS[..., seed] = c, ca, cs
+            done += 1
+            el = time.time() - t0
+            print(f"  [{done}/{len(jobs)}] {el:6.0f}s eta {el/done*(len(jobs)-done):6.0f}s",
+                  flush=True)
+    save(os.path.join(RESULTS, "evolution_stochastic.npz"),
+         {"sigma": sigmas, "rho": rhos, "alpha": alphas, "C": C, "CA": CA, "CS": CS,
+          "L": L, "K": K, "n_seeds": n_seeds, "p": p})
+
+
+def _evo_real_job(args):
+    from poi.bpr import frank_wolfe_mixed, read_tntp
+    from poi.stochastic import solve_stochastic_bpr
+
+    name, sigma, rho, alpha, K = args
+    net = read_tntp(os.path.join(TNTP_BASE, name))
+    if sigma == 0.0:
+        r = frank_wolfe_mixed(net, alpha, tol=1e-6, max_iter=800)
+    else:
+        r = solve_stochastic_bpr(net, sigma, rho, K, alpha, rng=77,
+                                 tol=1e-6, max_iter=800)
+    return name, sigma, rho, alpha, r.total_cost, r.cost_altruist, r.cost_selfish, r.rel_gap
+
+
+def evolution_real():
+    """The same class costs on real road networks under idiosyncratic error."""
+    _banner("Evolution of altruism -- class costs on real road networks")
+    from concurrent.futures import ProcessPoolExecutor
+
+    if not os.path.isdir(TNTP_BASE):
+        print("  benchmark data not found; skipping", flush=True)
+        return
+    names = ("SiouxFalls", "Eastern-Massachusetts")
+    sigmas = np.array([0.0, 0.1, 0.2, 0.4, 0.7])
+    rhos = np.array([0.0, 1.0])
+    alphas = np.linspace(0.1, 0.9, 5)
+    K = 12
+    jobs = [(n, float(sg), float(rh), float(al), K)
+            for n in names for sg in sigmas for rh in rhos for al in alphas]
+    idx = {n: i for i, n in enumerate(names)}
+    shape = (len(names), sigmas.size, rhos.size, alphas.size)
+    C = np.full(shape, np.nan)
+    CA = np.full(shape, np.nan)
+    CS = np.full(shape, np.nan)
+    G = np.full(shape, np.nan)
+    done = 0
+    t0 = time.time()
+    with ProcessPoolExecutor(max_workers=n_workers()) as ex:
+        for name, sg, rh, al, c, ca, cs, g in ex.map(_evo_real_job, jobs, chunksize=1):
+            i = idx[name]
+            j = int(np.argmin(abs(sigmas - sg)))
+            k = int(np.argmin(abs(rhos - rh)))
+            m = int(np.argmin(abs(alphas - al)))
+            C[i, j, k, m], CA[i, j, k, m], CS[i, j, k, m], G[i, j, k, m] = c, ca, cs, g
+            done += 1
+            el = time.time() - t0
+            print(f"  [{done}/{len(jobs)}] {el:6.0f}s eta {el/done*(len(jobs)-done):6.0f}s",
+                  flush=True)
+    save(os.path.join(RESULTS, "evolution_real.npz"),
+         {"names": np.array(names), "sigma": sigmas, "rho": rhos, "alpha": alphas,
+          "C": C, "CA": CA, "CS": CS, "rel_gap": G, "K": K})
+
+
 ALL.update({
+    "evolution_stochastic": evolution_stochastic,
+    "evolution_real": evolution_real,
     "stochastic_lattice": stochastic_lattice,
     "stochastic_convergence": stochastic_convergence,
     "stochastic_irregular": stochastic_irregular,

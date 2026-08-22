@@ -23,7 +23,7 @@ from poi.metrics import efficiency, saturation_alpha  # noqa: E402
 from poi.sweep import load  # noqa: E402
 from style import (  # noqa: E402
     AQUA, AXIS, BLUE, DIVERGING, GRID, INK, INK_2, MUTED, ORANGE, RED, SEQ_BLUE,
-    ORANGE_RAMP, SEQ_ORANGE, SERIES, SURFACE, VIOLET, band, direct_label, mean_sem,
+    BLUE_RAMP, ORANGE_RAMP, SEQ_ORANGE, SERIES, SURFACE, VIOLET, band, direct_label, mean_sem,
     nanmean, ordinal, pc_line, use_style,
 )
 
@@ -1184,6 +1184,200 @@ def fig_stochastic_transfer():
 
 
 ALL.update({"stochastic": fig_stochastic, "stochastic_transfer": fig_stochastic_transfer})
+
+
+# --------------------------------------------------------------- figure 17 --
+def fig_evolution():
+    r"""Study 1: the imitation payoff landscape, lattice versus real network.
+
+    Plots $D(\alpha) = C_A - C_S$, the journey-time penalty for being the
+    altruist.  Imitation pushes $\alpha$ down wherever $D > 0$ and up wherever
+    $D < 0$, so the sign of this curve is the whole dynamics.
+    """
+    from poi.evolution import invasion_signs, rest_points, settle
+
+    j = load(os.path.join(RESULTS, "joint_surface.npz"))
+    r = load(os.path.join(RESULTS, "real_networks.npz"))
+    names = [str(x) for x in r["names"]]
+
+    fig, axes = plt.subplots(1, 3, figsize=(13.4, 4.3))
+
+    # (a) lattice: the penalty is positive everywhere and grows with ignorance
+    ax = axes[0]
+    al, w = j["alpha"], j["omega"]
+    CA, CS = nanmean(j["CA"], axis=2), nanmean(j["CS"], axis=2)
+    picks = [0, 6, 12, 18]
+    cols = ordinal(len(picks), ORANGE_RAMP)
+    for c, k in zip(cols, picks):
+        D = CA[1, k] - CS[1, k]
+        ax.plot(al, D, color=c, lw=1.9, label=rf"$\omega={w[k]:.2f}$")
+    ax.set_yscale("log")
+    leg = ax.legend(title="ignorance", loc="upper right", frameon=False,
+                    fontsize=8, title_fontsize=8, handlelength=1.4, labelspacing=.3)
+    leg._legend_box.align = "left"
+    ax.annotate("", xy=(0.20, 0.50), xytext=(0.62, 0.50), xycoords="axes fraction",
+                textcoords="axes fraction",
+                arrowprops=dict(arrowstyle="-|>", color=MUTED, lw=1.6))
+    ax.text(0.41, 0.535, "imitation drives $\\alpha$ this way", transform=ax.transAxes,
+            ha="center", fontsize=8, color=INK_2)
+    ax.set_xlabel(r"altruistic fraction $\alpha$")
+    ax.set_ylabel(r"$C_A - C_S$   (altruist's penalty)")
+    ax.set_title("a.  Lattice: altruists always pay,\n      and ignorance raises the bill", loc="left")
+    ax.set_ylim(0.3, 30)
+
+    # (b) Sioux Falls: the penalty turns into a bonus once drivers are ignorant
+    ax = axes[1]
+    al2, w2 = r["alpha"], r["omega"]
+    picks2 = [0, 2, 4, 6, 8]
+    cols2 = ordinal(len(picks2), BLUE_RAMP)
+    for c, k in zip(cols2, picks2):
+        D = r["CA"][0, k] - r["CS"][0, k]
+        ax.plot(al2, D, color=c, lw=1.9, label=rf"$\omega={w2[k]:.1f}$")
+        for q in rest_points(al2, D):
+            if not q.stable:
+                continue
+            if q.kind == "mixed":
+                ax.plot([q.alpha], [0.0], "o", color=c, ms=6.5, mec=SURFACE, mew=1.1, zorder=6)
+            elif q.kind == "altruistic":
+                # Altruism fixates: there is no interior rest point to mark.
+                ax.plot([1.0], [0.0], ">", color=c, ms=7, mec=SURFACE, mew=1.0,
+                        clip_on=False, zorder=6)
+    ax.axhline(0.0, color=INK, lw=1.0)
+    leg = ax.legend(title="ignorance", loc="lower right", frameon=False, ncol=2,
+                    fontsize=8, title_fontsize=8, handlelength=1.4, labelspacing=.3,
+                    columnspacing=1.1)
+    leg._legend_box.align = "left"
+    ax.set_ylim(-1.55, 1.35)
+    ax.set_xlabel(r"altruistic fraction $\alpha$")
+    ax.set_ylabel(r"$C_A - C_S$   (altruist's penalty)")
+    ax.set_title("b.  Sioux Falls: below the line the\n      altruist is the faster driver", loc="left")
+
+    # (c) what the settled population is worth
+    ax = axes[2]
+    width = 0.26
+    for i, (n, c) in enumerate(zip(names, SERIES)):
+        gains, alphas = [], []
+        for k in range(w2.size):
+            D = r["CA"][i, k] - r["CS"][i, k]
+            e = settle(al2, D, r["C"][i, k], alpha0=0.5)
+            gains.append(100 * e.gain)
+            alphas.append(e.alpha_star)
+        ax.plot(100 * w2, gains, color=c, lw=1.9, marker="o", ms=3.4)
+        lab = {"SiouxFalls": "Sioux Falls",
+               "Eastern-Massachusetts": "E. Massachusetts"}.get(n, n)
+        kk = [2, 8, 6][i]
+        direct_label(ax, 100 * w2[kk], gains[kk], lab, c, dy=[-13, -13, -13][i])
+    ax.axhline(0.0, color=INK, lw=1.0)
+    ax.set_xlabel(r"ignorance $\omega$ (%)")
+    ax.set_ylabel("gain captured with no enforcement (%)")
+    ax.set_title("c.  Ignorance buys real efficiency\n      that nobody has to impose", loc="left")
+    ax.set_ylim(-8, 108)
+
+    fig.suptitle(
+        "Altruism is evolutionarily doomed on the lattice and self-sustaining in a real city",
+        x=0.008, y=0.99, ha="left", fontsize=12, fontweight="bold", color=INK,
+    )
+    fig.text(
+        0.008, 0.925,
+        "Drivers copy whichever class got home sooner. The altruistic fraction is then a state variable, not a dial: "
+        r"it falls wherever $C_A > C_S$ and rises wherever $C_A < C_S$." "\n"
+        "In b, a dot marks where the mixture settles; an arrow marks altruism taking over completely.",
+        ha="left", fontsize=8.5, color=INK_2,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.875))
+    _save(fig, "fig17_evolution.png")
+
+
+# --------------------------------------------------------------- figure 18 --
+def fig_evolution_stochastic():
+    r"""Where random error makes altruism pay for itself.
+
+    The same imitation dynamics as figure 17, now over the $(\sigma, \rho)$
+    plane: does a lone altruist beat the crowd when every driver misjudges
+    travel times independently, or only when they all misjudge them together?
+    """
+    from poi.evolution import invasion_signs, settle
+
+    e = load(os.path.join(RESULTS, "evolution_stochastic.npz"))
+    sg, rh, al = e["sigma"], e["rho"], e["alpha"]
+    C, CA, CS = (nanmean(e[k], axis=3) for k in ("C", "CA", "CS"))
+
+    A = np.array([[settle(al, CA[i, j] - CS[i, j], C[i, j], alpha0=0.5).alpha_star
+                   for i in range(sg.size)] for j in range(rh.size)])
+    G = np.array([[settle(al, CA[i, j] - CS[i, j], C[i, j], alpha0=0.5).gain
+                   for i in range(sg.size)] for j in range(rh.size)])
+
+    fig, axes = plt.subplots(1, 3, figsize=(13.4, 4.3))
+
+    # (a) the settled fraction over the plane
+    ax = axes[0]
+    im = ax.imshow(A, origin="lower", aspect="auto", cmap=SEQ_BLUE, vmin=0.0, vmax=1.0,
+                   extent=(-0.5, sg.size - 0.5, -0.5, rh.size - 0.5))
+    for j in range(rh.size):
+        for i in range(sg.size):
+            if A[j, i] > 1e-3:
+                ax.text(i, j, f"{A[j, i]:.2f}", ha="center", va="center", fontsize=7.5,
+                        color=SURFACE if A[j, i] > 0.55 else INK)
+    ax.set_xticks(range(sg.size))
+    ax.set_xticklabels([f"{v:g}" for v in sg], fontsize=8)
+    ax.set_yticks(range(rh.size))
+    ax.set_yticklabels([f"{v:g}" for v in rh], fontsize=8)
+    ax.set_xlabel(r"error magnitude $\sigma$")
+    ax.set_ylabel(r"error correlation $\rho$")
+    ax.set_title("a.  Altruism survives only where\n      drivers are wrong together", loc="left")
+    ax.grid(False)
+    cb = fig.colorbar(im, ax=ax, fraction=0.045, pad=0.02)
+    cb.set_label(r"settled altruistic fraction $\alpha^*$", fontsize=8)
+    cb.ax.tick_params(labelsize=7.5)
+
+    # (b) the payoff curves that produce it
+    ax = axes[1]
+    i0 = int(np.argmin(abs(sg - 0.3)))
+    for j, c, lab in [(0, ORANGE, r"independent  $\rho=0$"),
+                      (rh.size // 2, VIOLET, rf"$\rho={rh[rh.size // 2]:g}$"),
+                      (rh.size - 1, BLUE, r"shared  $\rho=1$")]:
+        D = CA[i0, j] - CS[i0, j]
+        ax.plot(al, D, color=c, lw=2.0, marker="o", ms=3.4, label=lab)
+        r = settle(al, D, C[i0, j], alpha0=0.5)
+        if r.alpha_star > 1e-3:
+            ax.plot([r.alpha_star], [0.0], "o", color=c, ms=7.5, mec=SURFACE, mew=1.2,
+                    zorder=6)
+    ax.axhline(0.0, color=INK, lw=1.0)
+    ax.legend(loc="lower right", frameon=False, fontsize=8, handlelength=1.5)
+    ax.set_xlabel(r"altruistic fraction $\alpha$")
+    ax.set_ylabel(r"$C_A - C_S$   (altruist's penalty)")
+    ax.set_title(rf"b.  At $\sigma={sg[i0]:g}$: shared error turns" "\n"
+                 "      the penalty into a head start", loc="left")
+
+    # (c) what the settled population is worth
+    ax = axes[2]
+    cols = ordinal(rh.size)
+    for j, c in enumerate(cols):
+        ax.plot(sg, 100 * G[j], color=c, lw=1.9, marker="o", ms=3.4)
+        k = int(np.argmax(G[j])) if G[j].max() > 1e-3 else sg.size - 1
+        direct_label(ax, sg[k], 100 * G[j][k], rf"$\rho={rh[j]:g}$", c,
+                     dy=10 if G[j].max() > 1e-3 else -11)
+    ax.axhline(0.0, color=INK, lw=1.0)
+    ax.set_xlabel(r"error magnitude $\sigma$")
+    ax.set_ylabel("gain captured with no enforcement (%)")
+    ax.set_title("c.  How much efficiency arrives\n      for free", loc="left")
+
+    fig.suptitle(
+        "Shared uncertainty is what makes unselfishness pay for itself",
+        x=0.008, y=0.99, ha="left", fontsize=12, fontweight="bold", color=INK,
+    )
+    fig.text(
+        0.008, 0.925,
+        "When every driver misjudges the same road the same way, the altruist's detour lands on roads the "
+        "crowd has mistakenly avoided,\nso being unselfish and being right coincide. Independent errors "
+        "already spread the traffic, leaving the altruist nothing to gain.",
+        ha="left", fontsize=8.5, color=INK_2,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.875))
+    _save(fig, "fig18_evolution_stochastic.png")
+
+
+ALL.update({"evolution": fig_evolution, "evolution_stochastic": fig_evolution_stochastic})
 
 
 if __name__ == "__main__":
