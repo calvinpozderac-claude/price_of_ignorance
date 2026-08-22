@@ -52,6 +52,14 @@ informed, not less. The lattice's over-correction is real but lives in a corner
 of parameter space that real networks are not in — the deciding assumption is
 that every lattice path crosses exactly `2L` roads.
 
+**And the same asymmetry decides whether altruism can survive at all.** Part V
+lets drivers copy whoever got home sooner, turning `α` from a dial into a state
+variable. On the lattice altruism dies out in every regime tested and ignorance
+only widens the sacrifice. On Sioux Falls it is the reverse: past `ω = 0.2` a
+lone altruist is already the *faster* driver, so the population settles at a
+stable mixture that captures 25–100% of the achievable gain with nobody
+enforcing anything. Ignorance is what makes unselfishness pay for itself.
+
 ## Contents
 
 ```
@@ -62,11 +70,12 @@ poi/irregular.py  networks with unequal path lengths, to test that assumption
 poi/bpr.py        real road networks: TNTP data, BPR costs, Frank-Wolfe solver
 poi/stochastic.py idiosyncratic driver error with tunable correlation, + logit SUE
 poi/pigou.py      exact closed-form two-road solution, with and without ignorance
+poi/evolution.py  imitation dynamics on the altruistic fraction (study 1)
 poi/metrics.py    efficiency, saturation, exploitation gap, backfire
 poi/sweep.py      parallel disorder-averaged sweeps over (p, omega, alpha)
 experiments/      compute.py builds results/*.npz; plots.py renders figures/*.png
                   summary.py prints every headline number
-tests/            375 tests: both papers' sanity checks, closed forms vs solver,
+tests/            394 tests: both papers' sanity checks, closed forms vs solver,
                   equilibrium conditions, the analytic substitution law, the
                   published Sioux Falls equilibrium, and the robustness claims
 ```
@@ -571,6 +580,101 @@ where independent drivers scatter over genuinely bad routes while a shared bias
 at least keeps everyone coherent.
 
 Altruism helps on both real networks at every `σ` and every `ρ` tested, by 3–11%.
+
+## Part V: would anyone *choose* to be altruistic?
+
+Parts I–IV set the altruistic fraction `α` by hand. But part I's own result is
+that the altruists are the ones paying: over 69% of the `α` range on the lattice
+they travel *slower* than they did under full anarchy, while the selfish free-ride
+14–17% below the social optimum. If drivers can see how their neighbours did and
+copy whoever got home sooner, `α` stops being a dial and becomes a state variable.
+
+`poi/evolution.py` puts the standard two-strategy imitation (replicator) dynamics
+on top of the class costs every solver already returns. Writing
+`D(α) = C_A(α) − C_S(α)` for the journey-time penalty of being the altruist,
+
+```
+dα/dt = α(1−α)·(−D(α))  +  μ·(1/2 − α)
+```
+
+The first term is imitation; the optional `μ` is a small mutation rate that makes
+the boundaries leaky, so *"can altruism invade?"* has an answer that does not
+depend on the initial condition. Nothing in the module re-solves a network — it
+takes a sampled `D(α)` curve — so the same code answers the question on the
+lattice QP, on the BPR networks and under stochastic error. The sign of `D` is
+the entire dynamics: `α` falls wherever altruists pay and rises wherever they
+don't.
+
+Two boundary values decide almost everything. `D(0) < 0` means a *lone* altruist
+in a fully selfish crowd already arrives sooner — altruism invades. `D(1) > 0`
+means a *lone defector* in a fully altruistic crowd does better — altruism is
+invadable. Both are extrapolated from the two nearest interior samples, since
+`C_A` is undefined at `α = 0` and `C_S` at `α = 1`.
+
+![Evolution](figures/fig17_evolution.png)
+
+### 16. On the lattice, altruism is doomed — and ignorance makes it worse
+
+`D(0) > 0` in all 60 `(p, ω)` cells of the joint surface. Not one of them lets
+altruism get started, and the penalty *grows* steeply with ignorance:
+
+| `p` | `ω = 0` | `ω = 0.3` | `ω = 0.6` | `ω = 0.9` |
+|---|---|---|---|---|
+| 0.45 | +0.47 | +1.24 | +2.79 | +9.05 |
+| 0.645 (`p_c`) | +0.40 | +0.89 | +1.99 | +7.39 |
+| 0.85 | +0.00 | +0.02 | +0.22 | +3.60 |
+
+So the lattice gives the bleakest possible answer: the socially useful strategy
+is the individually expensive one everywhere, ignorance makes the sacrifice
+larger rather than smaller, and imitation drives the population to `α = 0` — the
+price of anarchy — from any starting mixture. Part II's finding that altruism
+*hurts* past `ω ≈ 0.45` is not even needed; altruism does not survive long enough
+for it to matter.
+
+The decay is slow, though, not sharp. In Pigou's two roads the gap closes
+linearly at the boundary (`D ≈ α`), so the velocity is quadratic and altruism
+dies off like `1/t` rather than exponentially.
+
+### 17. On a real road network, ignorance is exactly what keeps altruism alive
+
+The real networks reverse it. On Sioux Falls a lone altruist is *slower* than the
+crowd when everyone knows the roads (`D(0) = +1.42`), but once drivers misjudge
+them the sign flips and stays flipped:
+
+| `ω` | `D(0)` | `D(1)` | settled `α*` | gain captured |
+|---|---|---|---|---|
+| 0.0 | +1.415 | +0.524 | 0.000 | 0% |
+| 0.2 | −0.572 | +0.081 | 0.150 | 25% |
+| 0.4 | −1.357 | −0.092 | takeover | 100% |
+| 0.6 | −1.759 | +0.003 | 0.280 | 59% |
+| 0.8 | −0.630 | +0.250 | 0.238 | 72% |
+
+Eastern Massachusetts crosses over at `ω = 0.6` and captures **88%** of the
+achievable gain at `ω = 0.8` from a settled `α* = 0.20`. Anaheim never crosses
+over — it is the least congested of the three (price of anarchy 1.018), so there
+is almost no externality for altruism to profit from.
+
+The mechanism is the one that explains Parts II–IV as well. An ignorant selfish
+crowd piles onto roads it *believes* are fast. The altruist is routing on
+perceived *marginal* cost, so she steps off exactly those roads — and under
+ignorance the roads the crowd has mistakenly avoided really are faster. Being
+unselfish and being right coincide. She is not making a sacrifice at all; she is
+the only driver whose objective function accidentally corrects for the bias.
+
+Two consequences worth stating plainly:
+
+* **A mixed population is the generic outcome, not a knife edge.** `D` crosses
+  zero *upwards*, so the interior rest point attracts from both sides: too many
+  altruists and defecting pays, too few and converting pays. `α*` between 0.15
+  and 0.28 on Sioux Falls is stable, not tuned.
+* **The efficiency is free.** Nobody enforces `α*`; it is where self-interested
+  copying lands. On Sioux Falls at `ω = 0.8` that is 72% of the entire gap
+  between anarchy and the social optimum, with no tolls, no mandates and no
+  coordination.
+
+The one caveat: `D(1) = −0.092` at `ω = 0.4` is an extrapolation, so "complete
+takeover" there means the altruist is still ahead at the last sampled point
+(`α = 0.9`, `D = −0.109`), and the curve's slope carries it past 1.
 
 ## Caveats
 
